@@ -5,7 +5,8 @@
 
 ## Configuration
 ### Shell Environment Variables
-- To set these, from your terminal session you type export FEED_KEY=xxxx and press return.
+- To set these, from your terminal session you type export FEED_KEY=xxxx and pres
+s return.
 ### These are the two variables that feed uses. If they are unset, feed will tell you and quit.
 - FEED_KEY is the api key for your AI service
 - FEED_MODEL is the model name you can use with your service
@@ -19,4 +20,4 @@
 - ./feed 
 - Without arguments it will tell you to give it an argument.
 
-
+<img width="896" height="1072" alt="Screenshot From 2026-03-08 20-21-10" src="https://github.com/user-attachments/assets/55e13e72-10e6-46f1-a00a-cc5a50715090" />
