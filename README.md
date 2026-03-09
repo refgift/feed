@@ -5,15 +5,16 @@ Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API k
 They have models, like grok-code-fast which is different from opus. Model names and api key are the gate and 
 feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI
 and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
-that is used is based on the OpenAi whih designed it and it standardized. 
+that is used is based on the OpenAi which designed it and it standardized. 
 
 The interface to the AI server is stateless. Nothing happens outside of the prompt and response unless the
-client, like feed keeps the "session" alive. You can use the command history and edit the prompt you previously
+client, like feed, keeps the "session" alive. You can use the command history and edit the prompt you previously
 sent and keep it going for a long time that way.
 
-feed can be called from shell programs. There maybe utility to periodically using feed to get a system analysis
-by build a prompt with system data collections. You could use ls -lotr to find folders and tar files and make a prompt 
-of that and ask for a shell script tar the folders , meta tar the tarfiles. You redirect the feed output to a file.
+feed can be called from the shell programs. There might be utility to periodical use of feed to get a system analysis
+by building a prompt with system data collections. You could use ls -lotr to find folders and tar files and make a prompt 
+of that and ask for a shell script that tar compresses the folders, then meta-tar the tarfiles. 
+You can redirect the feed output to a file.
 
 There are many opportunities with a prompt and response program.
 
