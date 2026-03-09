@@ -179,7 +179,7 @@ int main(int argc, char **argv, char**expv) {
             }
         } else {
             putchar(*p);
-	    if (cols++ > 80 && isblank(*p)) {
+	    if (cols++ > 72 && isblank(*p)) {
 		putchar(10);
 		cols=0;
 	     }
