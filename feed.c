@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
-
 /* Forward declarations for splint */
 extern char *strdup(const char *s);
 extern FILE *fdopen(int fd, const char *mode);
@@ -134,7 +133,6 @@ extern char **environ;
     free(content);
     return NULL;
 }
-
 static void print_folded(const char *text, int width) {
     const char *p = text;
     while (*p) {
@@ -174,6 +172,7 @@ static void print_folded(const char *text, int width) {
 }
 static char * key;
 static char * value;
+static char api_url[1024] = "";
 static char api_key[1024] = "";
 static char api_model[1024] = "";
 static char api_user[1024] = "";
@@ -194,6 +193,16 @@ int main(int argc, char **argv) {
 	key = strtok(env_copy,"=");
 	value = strtok(NULL,"=");
 	//printf("%s %s\n",key, value);
+	if (key && strcmp(key,"FEED_URL")==0) {
+		if (value && strlen(value) < sizeof(api_url)) {
+			strncpy(api_url, value, sizeof(api_url) - 1);
+			api_url[sizeof(api_url) - 1] = '\0';
+		} else {
+			fprintf(stderr, "FEED_URL value too long or null\n");
+			free(env_copy);
+			exit(EXIT_FAILURE);
+		}
+ }
 	if (key && strcmp(key,"FEED_KEY")==0) {
 		if (value && strlen(value) < sizeof(api_key)) {
 			strncpy(api_key, value, sizeof(api_key) - 1);
@@ -266,14 +275,12 @@ int main(int argc, char **argv) {
     char json_data[BUFFER_SIZE];
     if (strlen(api_user)!=0) {
     written = snprintf(json_data, sizeof(json_data),
-        "{\"model\":\"%s\",\"messages\":["
-        "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
-        "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}]}",
+        "{\"model\": \"%s\",\"system\": \"no contexts is a programming enabler\",\"messages\":["
+        "{\"role\": \"user\",\"name\" :\"%s\",\"content\":\"%s\"}]}",
         api_model, api_user, escaped);
     } else {    
        written = snprintf(json_data, sizeof(json_data), 
         "{\"model\":\"%s\",\"messages\":["
-        "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
         "{\"role\":\"user\",\"content\":\"%s\"}]}",
         api_model, escaped);
     } 
@@ -284,7 +291,7 @@ int main(int argc, char **argv) {
         memset(api_user, 0, sizeof(api_user));
         return 1;
     }
-    char *args[] = {"curl", "-s", "--max-time", "3600", "https://api.x.ai/v1/chat/completions", "-H", "Content-Type: application/json", "-H", auth_header, "-d", json_data, NULL};
+    char *args[] = {"curl", "-s", "--max-time", "3600", api_url, "-H", "Content-Type: application/json", "-H", auth_header, "-d", json_data, NULL};
     // Create pipe and fork
     int pipefd[2];
     if (pipe(pipefd) == -1) {
@@ -357,7 +364,7 @@ int main(int argc, char **argv) {
     if (!content) {
         // Check for error response
         if (strstr(response, "\"error\"")) {
-            printf("API returned an error.\n");
+            printf("API returned an error: %s\n",response);
         } else {
             printf("No content in response.\n");
         }
