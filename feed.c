@@ -91,16 +91,9 @@ int main(int argc, char **argv, char**expv) {
         "\"temperature\":0.7,\"max_tokens\":4096}'",
         api_key, api_model, escaped);
 
-    
+  
 
-    if (strlen(argv[1])<80) {
-	    printf("\x1b[2J\x1b[H\x1b[34m%s\x1b[0m\n\n",argv[1]);
-    } else {
-	printf("\x1b[2J\x1b[H");
-	for (int i=0;i<strlen(argv[1])/80;i++) {
-	    printf("\x1b[34m%s\x1b[0m\n\n",&argv[1][i*80]);
-	}
-    }
+    printf("\x1b[2J\x1b[H\x1b[34m%s\x1b[0m\n\n",argv[1]);
 		
 
     FILE *pipe = popen(cmd, "r");
