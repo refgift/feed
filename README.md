@@ -1,7 +1,7 @@
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
 ## Usage
-Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API keys and payment by tokens used.
+Companies like xAi, and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-code-fast which is different from opus. Model names and api key are the gate and 
 feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI
 and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
