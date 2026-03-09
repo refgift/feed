@@ -5,8 +5,7 @@
 
 ## Configuration
 ### Shell Environment Variables
-- To set these, from your terminal session you type export FEED_KEY=xxxx and pres
-s return.
+- To set these, from your terminal session you type export FEED_KEY=$XAI_API_KEY, for example,  and press return.
 ### These are the two variables that feed uses. If they are unset, feed will tell you and quit.
 - FEED_KEY is the api key for your AI service
 - FEED_MODEL is the model name you can use with your service
