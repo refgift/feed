@@ -1,4 +1,4 @@
-# feed - a terminal based prompter for use with AI API services using the REST protocol.
+# feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
 ## Usage
 Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API keys and payment by tokens used.
