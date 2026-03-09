@@ -1,5 +1,22 @@
 # feed - a terminal based prompter for use with LLM API services using the REST protocol.
 
+## Usage
+Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API keys and payment by tokens used.
+They have models, like grok-code-fast which is different from opus. Model names and api key are the gate and 
+feed is a user interface of the simplest form, a command line command that take a prompt to send to an AI
+and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
+that is used is based on the OpenAi whih designed it and it standardized. 
+
+The interface to the AI server is stateless. Nothing happens outside of the prompt and response unless the
+client, like feed keeps the "session" alive. You can use the command history and edit the prompt you previously
+sent and keep it going for a long time that way.
+
+feed can be called from shell programs. There maybe utility to periodically using feed to get a system analysis
+by build a prompt with system data collections. You could use ls -lotr to find folders and tar files and make a prompt 
+of that and ask for a shell script tar the folders , meta tar the tarfiles. You redirect the feed output to a file.
+
+There are many opportunities with a prompt and response program.
+
 ## Dependencies
 - uses the curl utility found in every Linux repository, if not already installed.
 
