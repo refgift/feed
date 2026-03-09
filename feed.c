@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,48 +6,136 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+
+/* Forward declarations for splint */
+extern char *strdup(const char *s);
+extern FILE *fdopen(int fd, const char *mode);
+extern char **environ;
 #define BUFFER_SIZE (2 * 1024 * 1024)  // 2 MB - more than enough for any chat response
-static void print_unescaped(const char *s, char stop) {
-    printf("    ");  // 4-char left margin
-    // Skip leading spaces on first line
-    while (*s && isspace((unsigned char)*s) && *s != '\n') s++;
-    int cols=0;
-    while (*s && *s != stop) {
-        if (*s == '\\') {
-            ++s;
-            if (!*s) break;
-            switch (*s) {
-                case 'n':  (void)putchar('\n'); (void)printf("    ");
-                            // Skip leading spaces on new line
-                            while (*s && isspace((unsigned char)*s) && *s != '\n' && *s != stop) s++;
-                            break;
-                case 'r':  (void)putchar('\r'); break;
-                case 't':  (void)putchar('\t'); break;
-                case 'b':  (void)putchar('\b'); break;
-                case 'f':  (void)putchar('\f'); break;
-                case '"':  (void)putchar('"');  break;
-                case '\\': (void)putchar('\\'); break;
-                case '/':  (void)putchar('/');  break;
-                // \uXXXX is ignored for simplicity (most text is ASCII/UTF-8)
-                default:   (void)putchar(*s);
-            }
-            ++s;
-        } else {
-            (void)putchar(*s);
-            if (*s == '\n') (void)printf("    ");
-            ++s;
-        }
-       	// line folding
-        if (cols++ > 72 && isblank(*s)) {
-        	          (void)putchar(10);
-                      (void)printf("    ");
-                      // Skip leading spaces on folded line
-                      while (*s && isspace((unsigned char)*s) && *s != '\n' && *s != stop) s++;
-                   cols=0;
+// State machine-based JSON parser to extract "content" value from nested JSON
+// Returns a newly allocated string with the content, or NULL on error
+/*@null@*/ static char * extract_content_from_json(const char *json) {
+    enum {
+        SEEK_MESSAGE,   // Looking for "message" key
+        SEEK_CONTENT,   // Looking for "content" key inside message
+        SEEK_COLON,     // Looking for : after "content"
+        SEEK_VALUE,     // Skipping whitespace before value
+        IN_STRING,      // Inside the quoted string (actual content)
+        ESCAPE,         // Processing escape sequence
+        DONE            // Found and parsed content
+    } state = SEEK_MESSAGE;
+    
+    char *content = malloc(BUFFER_SIZE);
+    if (!content) return NULL;
+    
+    int content_idx = 0;    // Index in content buffer
+    const char *p = json;
+    
+    while (*p) {
+        switch (state) {
+            case SEEK_MESSAGE:
+                // Find "message" key (typically at root level)
+                if (*p == '"' && strncmp(p + 1, "message", 7) == 0) {
+                    p += 8;  // skip "message"
+                    state = SEEK_CONTENT;
+                } else {
+                    p++;
+                }
+                break;
+                
+            case SEEK_CONTENT:
+                // Find "content" key after "message"
+                if (*p == '"' && strncmp(p + 1, "content", 7) == 0) {
+                    p += 8;  // skip "content"
+                    state = SEEK_COLON;
+                } else if (*p == '}') {
+                    // End of message object, not found
+                    free(content);
+                    return NULL;
+                } else {
+                    p++;
+                }
+                break;
+                
+            case SEEK_COLON:
+                // Find : after "content"
+                if (*p == ':') {
+                    state = SEEK_VALUE;
+                }
+                p++;
+                break;
+                
+            case SEEK_VALUE:
+                // Skip whitespace and find opening quote
+                if (*p == '"') {
+                    p++;  // skip opening quote
+                    state = IN_STRING;
+                } else if (!isspace((unsigned char)*p)) {
+                    // Check for null
+                    if (strncmp(p, "null", 4) == 0) {
+                        free(content);
+                        return NULL;  // null content
+                    }
+                    p++;
+                } else {
+                    p++;
+                }
+                break;
+                
+            case IN_STRING:
+                // Inside the quoted string - copy until closing quote
+                if (*p == '\\') {
+                    state = ESCAPE;
+                    p++;
+                } else if (*p == '"') {
+                    // End of string
+                    content[content_idx] = '\0';
+                    state = DONE;
+                    p++;
+                } else {
+                    if (content_idx < BUFFER_SIZE - 1) {
+                        content[content_idx++] = *p;
+                    }
+                    p++;
+                }
+                break;
+                
+            case ESCAPE:
+                // Handle escape sequences
+                if (content_idx < BUFFER_SIZE - 1) {
+                    switch (*p) {
+                        case 'n':  content[content_idx++] = '\n'; break;
+                        case 'r':  content[content_idx++] = '\r'; break;
+                        case 't':  content[content_idx++] = '\t'; break;
+                        case 'b':  content[content_idx++] = '\b'; break;
+                        case 'f':  content[content_idx++] = '\f'; break;
+                        case '"':  content[content_idx++] = '"'; break;
+                        case '\\': content[content_idx++] = '\\'; break;
+                        case '/':  content[content_idx++] = '/'; break;
+                        default:   content[content_idx++] = *p;
+                    }
+                }
+                state = IN_STRING;
+                p++;
+                break;
+                
+            case DONE:
+                content[content_idx] = '\0';
+                return content;
         }
     }
+    
+    if (state == DONE) {
+        content[content_idx] = '\0';
+        return content;
+    }
+    
+    free(content);
+    return NULL;
 }
-void print_folded(const char *text, int width) {
+
+static void print_folded(const char *text, int width) {
     const char *p = text;
     while (*p) {
         (void)printf("    ");  // 4-char left margin
@@ -62,7 +151,7 @@ void print_folded(const char *text, int width) {
         }
         if (!*p || *p == '\n') {
             // end of text or newline, print the rest
-            (void)fwrite(line_start, 1, p - line_start, stdout);
+            (void)fwrite(line_start, 1, (size_t)(p - line_start), stdout);
             if (*p == '\n') {
                 (void)putchar('\n');
                 (void)printf("    ");  // indent next line
@@ -70,13 +159,13 @@ void print_folded(const char *text, int width) {
             if (*p) p++;
         } else if (last_space) {
             // fold at last_space
-            (void)fwrite(line_start, 1, last_space - line_start + 1, stdout);
+            (void)fwrite(line_start, 1, (size_t)(last_space - line_start + 1), stdout);
             (void)putchar('\n');
             (void)printf("    ");  // indent next line
             p = last_space + 1;
         } else {
             // no space, print up to width
-            (void)fwrite(line_start, 1, width, stdout);
+            (void)fwrite(line_start, 1, (size_t)width, stdout);
             (void)putchar('\n');
             (void)printf("    ");  // indent next line
             p = line_start + width;
@@ -85,16 +174,19 @@ void print_folded(const char *text, int width) {
 }
 static char * key;
 static char * value;
-static char api_key[1024];
-static char api_model[1024];
-static char api_user[1024];
-int main(int argc, char **argv, char**expv) {
+static char api_key[1024] = "";
+static char api_model[1024] = "";
+static char api_user[1024] = "";
+int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s \"your prompt here\"\n", argv[0]);
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
-    for (int i=0; expv[i]!=0; i++) {
-	char *env_copy = strdup(expv[i]);
+    for (int i=0; environ[i]!=0; i++) {
+	char *env_copy = strdup(environ[i]);
 	if (!env_copy) {
 		fprintf(stderr, "Memory allocation failed\n");
 		exit(EXIT_FAILURE);
@@ -133,10 +225,16 @@ int main(int argc, char **argv, char**expv) {
     }
     if (strlen(api_key)==0) {
 	fprintf(stderr, "No FEED_KEY exported\n");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         exit(EXIT_FAILURE);
     }
     if (strlen(api_model)==0) {
 	fprintf(stderr, "No FEED_MODEL exported\n");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         exit(EXIT_FAILURE);
     }
     // === Escape user input for safe JSON ===
@@ -158,8 +256,11 @@ int main(int argc, char **argv, char**expv) {
     // === Build curl args ===
     char auth_header[2048];
     int written = snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
-    if (written >= sizeof(auth_header)) {
+    if (written >= (int)sizeof(auth_header)) {
         fprintf(stderr, "Auth header too long\n");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
     char json_data[BUFFER_SIZE];
@@ -167,19 +268,20 @@ int main(int argc, char **argv, char**expv) {
     written = snprintf(json_data, sizeof(json_data),
         "{\"model\":\"%s\",\"messages\":["
         "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
-        "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}],"
-        "\"temperature\":0.7,\"max_tokens\":4096}",
+        "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}]}",
         api_model, api_user, escaped);
     } else {    
        written = snprintf(json_data, sizeof(json_data), 
         "{\"model\":\"%s\",\"messages\":["
         "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
-        "{\"role\":\"user\",\"content\":\"%s\"}],"
-        "\"temperature\":0.7,\"max_tokens\":4096}",
-        api_model, api_user, escaped);
+        "{\"role\":\"user\",\"content\":\"%s\"}]}",
+        api_model, escaped);
     } 
-    if (written >= sizeof(json_data)) {
+    if (written >= (int)sizeof(json_data)) {
         fprintf(stderr, "JSON data too long\n");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
     char *args[] = {"curl", "-s", "--max-time", "3600", "https://api.x.ai/v1/chat/completions", "-H", "Content-Type: application/json", "-H", auth_header, "-d", json_data, NULL};
@@ -187,11 +289,17 @@ int main(int argc, char **argv, char**expv) {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("pipe failed");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
     pid_t pid = fork();
     if (pid == -1) {
         perror("fork failed");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
     FILE *fp = NULL;
@@ -200,7 +308,7 @@ int main(int argc, char **argv, char**expv) {
         (void)close(pipefd[0]);
         (void)dup2(pipefd[1], STDOUT_FILENO);
         (void)close(pipefd[1]);
-        execvp("curl", args);
+        (void)execvp("curl", args);
         perror("execvp failed");
         exit(EXIT_FAILURE);
     } else {
@@ -209,6 +317,10 @@ int main(int argc, char **argv, char**expv) {
         fp = fdopen(pipefd[0], "r");
         if (!fp) {
             perror("fdopen failed");
+            (void)close(pipefd[0]);
+            memset(api_key, 0, sizeof(api_key));
+            memset(api_model, 0, sizeof(api_model));
+            memset(api_user, 0, sizeof(api_user));
             return 1;
         }
     }
@@ -221,27 +333,28 @@ int main(int argc, char **argv, char**expv) {
     char *response = malloc(BUFFER_SIZE);
     if (!response) {
         fprintf(stderr, "Memory allocation failed\n");
-        if (fp) pclose(fp);
+        if (fp) (void)fclose(fp);
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
     size_t len = fread(response, 1, BUFFER_SIZE - 1, fp);
     response[len] = '\0';
-    (void)pclose(fp);
+    if (fp) (void)fclose(fp);
     int status;
     (void)waitpid(pid, &status, 0);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "curl failed\n");
         free(response);
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
-    // === Find the assistant message content (context-aware) ===
-    // First locate the message object to avoid any other "content" fields
-    char *msg_start = strstr(response, "\"message\"");
-    if (!msg_start) {
-        msg_start = response;  // fallback
-    }
-    char *content_start = strstr(msg_start, "\"content\"");
-    if (!content_start) {
+    // === Extract content using state machine parser ===
+    char *content = extract_content_from_json(response);
+    if (!content) {
         // Check for error response
         if (strstr(response, "\"error\"")) {
             printf("API returned an error.\n");
@@ -249,60 +362,23 @@ int main(int argc, char **argv, char**expv) {
             printf("No content in response.\n");
         }
         free(response);
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
         return 1;
     }
-    // Find the colon after "content"
-    char *colon = strchr(content_start + 9, ':');
-    if (!colon) {
-        printf("Malformed JSON.\n");
-        free(response);
-        return 1;
-    }
-    // Skip whitespace
-    char *p = colon + 1;
-    while (*p && isspace((unsigned char)*p)) ++p;
-    // Handle null content (refusals, rate limits, etc.)
-    if (strncmp(p, "null", 4) == 0) {
-        printf("Response was empty (null content).\n");
-        free(response);
-        return 0;
-    }
-    // Must be a string
-    if (*p != '"') {
-        printf("Unexpected value type for content.\n");
-        free(response);
-        return 1;
-    }
-    ++p;  // skip opening quote
-    // === Print with proper unescaping until closing quote ===
-    char unescaped[BUFFER_SIZE];
-    int idx = 0;
-    const char *s = p;
-    while (*s && *s != '"') {
-        if (*s == '\\') {
-            ++s;
-            if (!*s) break;
-            switch (*s) {
-                case 'n': unescaped[idx++] = '\n'; break;
-                case 'r': unescaped[idx++] = '\r'; break;
-                case 't': unescaped[idx++] = '\t'; break;
-                case 'b': unescaped[idx++] = '\b'; break;
-                case 'f': unescaped[idx++] = '\f'; break;
-                case '"': unescaped[idx++] = '"'; break;
-                case '\\': unescaped[idx++] = '\\'; break;
-                case '/': unescaped[idx++] = '/'; break;
-                default: unescaped[idx++] = *s;
-            }
-            ++s;
-        } else {
-            unescaped[idx++] = *s;
-            ++s;
-        }
-    }
-    unescaped[idx] = '\0';
-    print_folded(unescaped, 72);
-    ++p;  // skip closing quote
-    putchar('\n');
+    
+    // Print the extracted content with proper formatting
+    print_folded(content, 72);
+    (void)putchar('\n');
+    
+    free(content);
     free(response);
+    
+    // Clear sensitive data from memory
+    memset(api_key, 0, sizeof(api_key));
+    memset(api_model, 0, sizeof(api_model));
+    memset(api_user, 0, sizeof(api_user));
+    
     return 0;
 }
