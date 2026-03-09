@@ -38,6 +38,7 @@ char * key;
 char * value;
 char api_key[1024];
 char api_model[1024];
+char api_user[1024];
 char * token;
 int main(int argc, char **argv, char**expv) {
     if (argc < 2) {
@@ -54,6 +55,9 @@ int main(int argc, char **argv, char**expv) {
 	if (strcmp(key,"FEED_MODEL")==0) {
 		strcpy(api_model,value);
 	}
+	if (strcmp(key,"FEED_USER")==0) {
+		strcpy(api_user,value);
+	}
     }
     if (strlen(api_key)==0) {
 	fprintf(stderr, "No FEED_KEY exported\n");
@@ -61,6 +65,10 @@ int main(int argc, char **argv, char**expv) {
     }
     if (strlen(api_model)==0) {
 	fprintf(stderr, "No FEED_MODEL exported\n");
+        exit(-1);
+    }
+    if (strlen(api_user)==0) {
+	fprintf(stderr, "No FEED_USER exported\n");
         exit(-1);
     }
     // === Escape user input for safe JSON ===
@@ -88,9 +96,9 @@ int main(int argc, char **argv, char**expv) {
         "-H 'Authorization: Bearer %s' "
         "-d '{\"model\":\"%s\",\"messages\":["
         "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
-        "{\"role\":\"user\",\"content\":\"%s\"}],"
+        "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}],"
         "\"temperature\":0.7,\"max_tokens\":4096}'",
-        api_key, api_model, escaped);
+        api_key, api_model, api_user, escaped);
     
     // Print the prompt  
     printf("\x1b[2J\x1b[H\x1b[34m");
