@@ -1,4 +1,4 @@
-# feed - a terminal based prompter for use with LLM API services using the REST protocol.
+# feed - a terminal based prompter for use with AI API services using the REST protocol.
 
 ## Usage
 Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API keys and payment by tokens used.
@@ -15,6 +15,9 @@ feed can be called from the shell programs. There might be utility to periodical
 by building a prompt with system data collections. You could use ls -lotr to find folders and tar files and make a prompt 
 of that and ask for a shell script that tar compresses the folders, then meta-tar the tarfiles. 
 You can redirect the feed output to a file.
+
+### Emotes
+The format is #e emotion. The AI I use, grok, changes radically when I send it how I feel: #e excited.
 
 There are many opportunities with a prompt and response program.
 
