@@ -3,7 +3,7 @@
 ## Usage
 Companies like xAi, Anthropic, OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-code-fast which is different from opus. Model names and api key are the gate and 
-feed is a user interface of the simplest form, a command line command that take a prompt to send to an AI
+feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI
 and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
 that is used is based on the OpenAi whih designed it and it standardized. 
 
