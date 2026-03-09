@@ -1,5 +1,8 @@
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
+## Limitation
+- Currently only works with xAI grok API system. A fix is coming.
+
 ## Usage
 Companies like xAi, and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-code-fast which is different from opus. Model names and api key are the gate and 
