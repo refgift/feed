@@ -122,14 +122,11 @@ int main(int argc, char **argv, char**expv) {
 			exit(EXIT_FAILURE);
 		}
 	}
+ // FEED_USER is OPTIONAL, some API system are too rigid
 	if (key && strcmp(key,"FEED_USER")==0) {
 		if (value && strlen(value) < sizeof(api_user)) {
 			strncpy(api_user, value, sizeof(api_user) - 1);
 			api_user[sizeof(api_user) - 1] = '\0';
-		} else {
-			fprintf(stderr, "FEED_USER value too long or null\n");
-			free(env_copy);
-			exit(EXIT_FAILURE);
 		}
 	}
 	free(env_copy);
@@ -140,10 +137,6 @@ int main(int argc, char **argv, char**expv) {
     }
     if (strlen(api_model)==0) {
 	fprintf(stderr, "No FEED_MODEL exported\n");
-        exit(EXIT_FAILURE);
-    }
-    if (strlen(api_user)==0) {
-	fprintf(stderr, "No FEED_USER exported\n");
         exit(EXIT_FAILURE);
     }
     // === Escape user input for safe JSON ===
@@ -170,12 +163,21 @@ int main(int argc, char **argv, char**expv) {
         return 1;
     }
     char json_data[BUFFER_SIZE];
+    if (strlen(api_user)!=0) {
     written = snprintf(json_data, sizeof(json_data),
         "{\"model\":\"%s\",\"messages\":["
         "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
         "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}],"
         "\"temperature\":0.7,\"max_tokens\":4096}",
         api_model, api_user, escaped);
+    } else {    
+       written = snprintf(json_data, sizeof(json_data), 
+        "{\"model\":\"%s\",\"messages\":["
+        "{\"role\":\"system\",\"content\":\"the system coding rule is no contexts.\"},"
+        "{\"role\":\"user\",\"content\":\"%s\"}],"
+        "\"temperature\":0.7,\"max_tokens\":4096}",
+        api_model, api_user, escaped);
+    } 
     if (written >= sizeof(json_data)) {
         fprintf(stderr, "JSON data too long\n");
         return 1;
@@ -210,12 +212,10 @@ int main(int argc, char **argv, char**expv) {
             return 1;
         }
     }
-
     // Print the prompt
     (void)printf("\x1b[2J\x1b[H\x1b[34m");
     print_folded(argv[1], 72);
     (void)printf("\x1b[0m\n\n");
-
     // Read the Response
     // === Read entire JSON response into memory (most robust approach) ===
     char *response = malloc(BUFFER_SIZE);

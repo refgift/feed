@@ -30,7 +30,7 @@ There are many opportunities with a prompt and response program.
 ### These are the two variables that feed uses. If they are unset, feed will tell you and quit.
 - FEED_KEY is the api key for your AI service
 - FEED_MODEL is the model name you can use with your AI service
-- FEED_USER is the name you want to use with your AI service
+- optional:  FEED_USER is the name you want to use with your AI service
 
 ## Build
 - A C compiler is necessary.
