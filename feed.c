@@ -217,6 +217,7 @@ static bool load_env_vars(void) {
 }
 
 /*@null@*/ static char *escape_prompt(const char *prompt) {
+    if (!prompt) return NULL;
     char *escaped = malloc(BUFFER_SIZE / 4);
     if (!escaped) return NULL;
     size_t j = 0;
@@ -247,6 +248,11 @@ int main(int argc, char **argv) {
             return 1;
         }
         i++;
+    }
+
+    if (!prompt) {
+        fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
+        return 1;
     }
 
     if (!load_env_vars()) {
