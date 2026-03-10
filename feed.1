@@ -1,0 +1,47 @@
+.TH FEED 1 "March 2026" "feed" "User Commands"
+.SH NAME
+feed \- terminal based prompter for AI API services
+.SH SYNOPSIS
+.B feed
+[\fB--debug\fR | \fB-d\fR] "\fIyour prompt here\fR"
+.SH DESCRIPTION
+feed is a command line tool that sends prompts to AI services using the OpenAI REST protocol. It is designed to work with APIs like xAI Grok and OpenAI. The tool takes a prompt, sends it to the configured AI model, and prints the formatted response.
+.SH OPTIONS
+.TP
+.B --debug, -d
+Enable debug mode. Prints the API URL, JSON payload, and raw response from the API.
+.SH ENVIRONMENT VARIABLES
+The following environment variables must be set:
+.TP
+.B FEED_URL
+The URL of the AI API endpoint.
+.TP
+.B FEED_KEY
+The API key for authentication.
+.TP
+.B FEED_MODEL
+The model name to use (e.g., grok-1).
+.PP
+Optional variables:
+.TP
+.B FEED_USER
+Name to use in prompts. Defaults to "Anonymous" if unset.
+.TP
+.B FEED_CONTEXT
+Context/system prompt for the AI. Defaults to "You are Grok, a helpful and maximally truthful AI built by xAI." if unset.
+.SH EXAMPLES
+.TP
+feed "What is the capital of France?"
+Send a simple prompt to the AI.
+.TP
+feed --debug "Explain quantum physics"
+Send a prompt with debug output enabled.
+.TP
+feed "$(cat README.md)"
+Include file contents in the prompt.
+.SH DEPENDENCIES
+Requires curl utility, which is available in most Linux distributions.
+.SH SEE ALSO
+curl(1)
+.SH AUTHOR
+feed is developed as an open source project.
