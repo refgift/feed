@@ -25,7 +25,7 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 ### Shell Environment Variables
 - To set these, from your terminal session you type export FEED_KEY=$XAI_API_KEY, for example,  and press return.
 - You can place the export of your AI session data in the .bashrc file that will set them for you.
-- Please be aware that these data are expensive and should be protectedby the system with logout and
+- Please be aware that these data are expensive and should be protected by the system with logout and
   automatic logout and screen lock. The Linux system has good system security, in my opinion.
 
 ### These are the  variables that feed uses. 
