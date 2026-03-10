@@ -59,5 +59,17 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - sudo cp feed /usr/local/bin will allow you to depense with the ./ 
 - mkdir ~/bin then cp feed ~/bin which can be done without security other than your authority.
 
+### Manpage Installation
+- To enable `man feed`, install the manpage:
+  - sudo mkdir -p /usr/local/man/man1
+  - sudo cp feed.1 /usr/local/man/man1/
+  - sudo mandb
+- For local installation without sudo:
+  - mkdir -p ~/man/man1
+  - cp feed.1 ~/man/man1/
+  - export MANPATH="$HOME/man:$MANPATH"
+  - mandb ~/man
+  - Add the export to ~/.bashrc for permanence.
+
 
 <img width="896" height="1072" alt="Screenshot From 2026-03-08 20-21-10" src="https://github.com/user-attachments/assets/55e13e72-10e6-46f1-a00a-cc5a50715090" />
