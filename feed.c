@@ -17,6 +17,27 @@ extern char **environ;
 // Improved JSON parser using cJSON-like approach, but kept simple
 // Returns a newly allocated string with the content, or NULL on error
 
+static char *apply_uniform_spacing(const char *text) {
+    if (!text) return NULL;
+    size_t len = strlen(text);
+    char *result = malloc(len * 2 + 1); // worst case
+    if (!result) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        result[j++] = text[i];
+        if ((text[i] == '.' || text[i] == '?' || text[i] == '!') && i + 1 < len && text[i + 1] == ' ') {
+            // Already has space, check if second space
+            if (i + 2 < len && text[i + 2] == ' ') {
+                // Already two spaces
+            } else {
+                result[j++] = ' '; // Add second space
+            }
+        }
+    }
+    result[j] = '\0';
+    return result;
+}
+
 static void save_code_blocks(const char *content, const char *prompt) {
     if (!content) return;
     const char *p = content;
@@ -227,10 +248,6 @@ int main(int argc, char **argv) {
         }
         i++;
     }
-    if (!prompt) {
-        fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
-        return 1;
-    }
 
     if (!load_env_vars()) {
         fprintf(stderr, "Missing or invalid FEED_URL, FEED_KEY, or FEED_MODEL\n");
@@ -314,7 +331,13 @@ int main(int argc, char **argv) {
     }
 
     printf("\x1b[2J\x1b[H\x1b[34m");
-    print_folded(prompt, 72);
+    char *fmt_prompt = apply_uniform_spacing(prompt);
+    if (fmt_prompt) {
+        print_folded(fmt_prompt, 75); // Use 75 like fmt
+        free(fmt_prompt);
+    } else {
+        print_folded(prompt, 75);
+    }
     printf("\x1b[0m\n\n");
 
     char *response = malloc(BUFFER_SIZE);
@@ -360,7 +383,13 @@ int main(int argc, char **argv) {
 
     save_code_blocks(content, prompt);
 
-    print_folded(content, 72);
+    char *fmt_content = apply_uniform_spacing(content);
+    if (fmt_content) {
+        print_folded(fmt_content, 75);
+        free(fmt_content);
+    } else {
+        print_folded(content, 75);
+    }
     (void)putchar('\n');
 
     free(content);

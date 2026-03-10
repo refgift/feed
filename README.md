@@ -19,6 +19,7 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - You can redirect the feed output to a file.
 - Use --debug or -d for debugging: prints API URL, JSON payload, and raw response.
 - Code blocks in responses are automatically extracted and saved to files.
+- Output is formatted with uniform spacing (like fmt -u) for better readability.
 ## Advanced Usage
 - **Sending file contents**: `feed "$(cat README.md)"` to include file content in the prompt.
 - **Redirecting output**: `feed "How to shower without soap" > shower_advice.txt` to save response to a file.
