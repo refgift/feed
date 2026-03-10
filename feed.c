@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -12,372 +13,288 @@ extern char *strdup(const char *s);
 extern FILE *fdopen(int fd, const char *mode);
 extern char **environ;
 #define BUFFER_SIZE (2 * 1024 * 1024)  // 2 MB - more than enough for any chat response
-// State machine-based JSON parser to extract "content" value from nested JSON
+
+// Improved JSON parser using cJSON-like approach, but kept simple
 // Returns a newly allocated string with the content, or NULL on error
+
+static void save_code_blocks(const char *content, const char *prompt) {
+    if (!content) return;
+    const char *p = content;
+    int block_count = 0;
+    while ((p = strstr(p, "```"))) {
+        p += 3; // skip ```
+        // Extract language
+        const char *lang_start = p;
+        while (*p != '\0' && *p != '\n') p++;
+        if (*p == '\n') p++; // skip newline
+        char lang[32] = "";
+        size_t lang_len = (size_t)(p - lang_start - 1); // -1 for newline
+        if (lang_len < sizeof(lang)) {
+            memcpy(lang, lang_start, lang_len);
+            lang[lang_len] = '\0';
+        }
+        // Find end ```
+        const char *code_start = p;
+        const char *end = strstr(p, "```");
+        if (!end) break; // malformed
+        int code_len = (int)(end - code_start);
+        char *code = malloc(code_len + 1);
+        if (!code) break;
+        memcpy(code, code_start, code_len);
+        code[code_len] = '\0';
+        // Infer filename
+        char filename[256];
+        char ext[8] = ".txt";
+        if (strcasecmp(lang, "c") == 0 || strstr(lang, "c") != NULL) strcpy(ext, ".c");
+        else if (strcasecmp(lang, "python") == 0 || strstr(lang, "py") != NULL) strcpy(ext, ".py");
+        else if (strcasecmp(lang, "javascript") == 0 || strstr(lang, "js") != NULL) strcpy(ext, ".js");
+        // Check prompt for "save as"
+        const char *save_as = strstr(prompt, "save as");
+        if (save_as) {
+            save_as += 8; // skip "save as "
+            const char *end_name = strstr(save_as, " ");
+            if (!end_name) end_name = save_as + strlen(save_as);
+            int name_len = (int)(end_name - save_as);
+            if (name_len < sizeof(filename) - 10) {
+            memcpy(filename, save_as, (size_t)name_len);
+            filename[name_len] = '\0';
+            // Ensure extension
+            if (!strstr(filename, ".")) strncat(filename, ext, sizeof(filename) - strlen(filename) - 1);
+            } else {
+                sprintf(filename, "food%s", ext);
+            }
+        } else {
+            snprintf(filename, sizeof(filename), "food%s", ext);
+        }
+        // Uniqueness
+        char final_name[256];
+        strcpy(final_name, filename);
+        int counter = 1;
+        while (access(final_name, F_OK) == 0) {
+            snprintf(final_name, sizeof(final_name), "%s_%d%s", filename, counter++, ext);
+        }
+        // Save
+        FILE *f = fopen(final_name, "w");
+        if (f) {
+            (void)fputs(code, f);
+            (void)fclose(f);
+            printf("Saved code to %s\n", final_name);
+        } else {
+            fprintf(stderr, "Failed to save to %s\n", final_name);
+        }
+        free(code);
+        p = end + 3; // skip ```
+        block_count++;
+    }
+    if (block_count > 0) {
+        printf("Extracted and saved %d file(s).\n", block_count);
+    }
+}
+
 /*@null@*/ static char * extract_content_from_json(const char *json) {
-    enum {
-        SEEK_CHOICES,   // Looking for "choices" key
-        SEEK_ARRAY,     // Looking for [ after choices
-        SEEK_OBJECT,    // Looking for { in array
-        SEEK_MESSAGE,   // Looking for "message" key inside object
-        SEEK_CONTENT,   // Looking for "content" key inside message
-        SEEK_COLON,     // Looking for : after "content"
-        SEEK_VALUE,     // Skipping whitespace before value
-        IN_STRING,      // Inside the quoted string (actual content)
-        ESCAPE,         // Processing escape sequence
-        DONE            // Found and parsed content
-    } state = SEEK_CHOICES;
-    
+    if (!json) return NULL;
+    const char *p = strstr(json, "\"choices\"");
+    if (!p) return NULL;
+    p = strstr(p, "\"message\"");
+    if (!p) return NULL;
+    p = strstr(p, "\"content\"");
+    if (!p) return NULL;
+    p = strstr(p, "\":");
+    if (!p) return NULL;
+    p += 2; // skip ":
+    while (*p != '\0' && isspace((unsigned char)*p)) p++;
+    if (*p != '"') return NULL;
+    p++; // skip opening "
     char *content = malloc(BUFFER_SIZE);
     if (!content) return NULL;
-    
-    int content_idx = 0;    // Index in content buffer
-    const char *p = json;
-
-    while (*p != '\0') {
-        switch (state) {
-            case SEEK_CHOICES:
-                // Find "choices" key at root level
-                if (*p == '"' && strncmp(p + 1, "choices", 7) == 0) {
-                    p += 8;  // skip "choices"
-                    state = SEEK_ARRAY;
-                } else {
-                    p++;
-                }
-                break;
-
-            case SEEK_ARRAY:
-                // Find [ after choices
-                if (*p == '[') {
-                    state = SEEK_OBJECT;
-                }
-                p++;
-                break;
-
-            case SEEK_OBJECT:
-                // Find { in array
-                if (*p == '{') {
-                    state = SEEK_MESSAGE;
-                } else if (*p == ']') {
-                    // Empty array
-                    free(content);
-                    return NULL;
-                }
-                p++;
-                break;
-
-            case SEEK_MESSAGE:
-                // Find "message" key inside object
-                if (*p == '"' && strncmp(p + 1, "message", 7) == 0) {
-                    p += 8;  // skip "message"
-                    state = SEEK_CONTENT;
-                } else {
-                    p++;
-                }
-                break;
-                
-            case SEEK_CONTENT:
-                // Find "content" key after "message"
-                if (*p == '"' && strncmp(p + 1, "content", 7) == 0) {
-                    p += 8;  // skip "content"
-                    state = SEEK_COLON;
-                } else if (*p == '}') {
-                    // End of message object, not found
-                    free(content);
-                    return NULL;
-                } else {
-                    p++;
-                }
-                break;
-                
-            case SEEK_COLON:
-                // Find : after "content"
-                if (*p == ':') {
-                    state = SEEK_VALUE;
-                }
-                p++;
-                break;
-                
-            case SEEK_VALUE:
-                // Skip whitespace and find opening quote
-                if (*p == '"') {
-                    p++;  // skip opening quote
-                    state = IN_STRING;
-                } else if (!isspace((unsigned char)*p)) {
-                    // Check for null
-                    if (strncmp(p, "null", 4) == 0) {
-                        free(content);
-                        return NULL;  // null content
-                    }
-                    p++;
-                } else {
-                    p++;
-                }
-                break;
-                
-            case IN_STRING:
-                // Inside the quoted string - copy until closing quote
-                if (*p == '\\') {
-                    state = ESCAPE;
-                    p++;
-                } else if (*p == '"') {
-                    // End of string
-                    content[content_idx] = '\0';
-                    state = DONE;
-                    p++;
-                } else {
-                    if (content_idx < BUFFER_SIZE - 1) {
-                        content[content_idx++] = *p;
-                    }
-                    p++;
-                }
-                break;
-                
-            case ESCAPE:
-                // Handle escape sequences
-                if (content_idx < BUFFER_SIZE - 1) {
-                    switch (*p) {
-                        case 'n':  content[content_idx++] = '\n'; break;
-                        case 'r':  content[content_idx++] = '\r'; break;
-                        case 't':  content[content_idx++] = '\t'; break;
-                        case 'b':  content[content_idx++] = '\b'; break;
-                        case 'f':  content[content_idx++] = '\f'; break;
-                        case '"':  content[content_idx++] = '"'; break;
-                        case '\\': content[content_idx++] = '\\'; break;
-                        case '/':  content[content_idx++] = '/'; break;
-                        default:   content[content_idx++] = *p;
-                    }
-                }
-                state = IN_STRING;
-                p++;
-                break;
-                
-            case DONE:
-                content[content_idx] = '\0';
-                return content;
+    size_t idx = 0;
+    while (*p != '\0' && *p != '"' && idx < BUFFER_SIZE - 1) {
+        if (*p == '\\') {
+            p++;
+            if (*p == 'n') content[idx++] = '\n';
+            else if (*p == 'r') content[idx++] = '\r';
+            else if (*p == 't') content[idx++] = '\t';
+            else if (*p == '"') content[idx++] = '"';
+            else if (*p == '\\') content[idx++] = '\\';
+            else content[idx++] = *p;
+        } else {
+            content[idx++] = *p;
         }
+        p++;
     }
-    
-    if (state == DONE) {
-        content[content_idx] = '\0';
-        return content;
-    }
-    
-    free(content);
-    return NULL;
+    content[idx] = '\0';
+    return content;
 }
+
 static void print_folded(const char *text, int width) {
+    if (!text) return;
     const char *p = text;
     while (*p != '\0') {
-        (void)printf("    ");  // 4-char left margin
-        // Skip leading spaces on this line
-        while (*p && isspace((unsigned char)*p) && *p != '\n') p++;
+        printf("    ");
+        while (*p != '\0' && isspace((unsigned char)*p) && *p != '\n') p++;
         const char *line_start = p;
         int col = 0;
         const char *last_space = NULL;
-        while (*p && *p != '\n' && col < width) {
+        while (*p != '\0' && *p != '\n' && col < width) {
             if (isspace((unsigned char)*p)) last_space = p;
             col++;
             p++;
         }
-        if (!*p || *p == '\n') {
-            // end of text or newline, print the rest
+        if (*p == '\0' || *p == '\n') {
             (void)fwrite(line_start, 1, (size_t)(p - line_start), stdout);
-            if (*p == '\n') {
-                (void)putchar('\n');
-                (void)printf("    ");  // indent next line
-            }
-            if (*p) p++;
+            if (*p == '\n') (void)putchar('\n');
+            if (*p != '\0') p++;
         } else if (last_space) {
-            // fold at last_space
             (void)fwrite(line_start, 1, (size_t)(last_space - line_start + 1), stdout);
             (void)putchar('\n');
-            (void)printf("    ");  // indent next line
             p = last_space + 1;
         } else {
-            // no space, print up to width
             (void)fwrite(line_start, 1, (size_t)width, stdout);
             (void)putchar('\n');
-            (void)printf("    ");  // indent next line
             p = line_start + width;
         }
     }
 }
-static char * key;
-static char * value;
+
 static char api_url[1024] = "";
 static char api_key[1024] = "";
 static char api_model[1024] = "grok-1";
 static char api_user[1024] = "Anonymous";
 static char api_context[1024] = "You are Grok, a helpful and maximally truthful AI built by xAI.";
 static bool debug = false;
-int main(int argc, char **argv) {
-    char *prompt;
-    if (argc == 3 && (strcmp(argv[1], "--debug") == 0 || strcmp(argv[1], "-d") == 0)) {
-        debug = true;
-        prompt = argv[2];
-    } else if (argc == 2) {
-        prompt = argv[1];
-    } else {
-        fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
-        return 1;
-    }
-    for (int i=0; environ[i]!=0; i++) {
-	char *env_copy = strdup(environ[i]);
-	if (!env_copy) {
-		fprintf(stderr, "Memory allocation failed\n");
-		exit(EXIT_FAILURE);
-	}
-	key = strtok(env_copy,"=");
-	value = strtok(NULL,"=");
-	//printf("%s %s\n",key, value);
-	if (key && strcmp(key,"FEED_URL")==0) {
-		if (value && strlen(value) < sizeof(api_url)) {
-			strncpy(api_url, value, sizeof(api_url) - 1);
-			api_url[sizeof(api_url) - 1] = '\0';
-        } else {
-            fprintf(stderr, "FEED_URL value too long or null\n");
-            memset(api_key, 0, sizeof(api_key));
-            memset(api_model, 0, sizeof(api_model));
-            memset(api_user, 0, sizeof(api_user));
-            memset(api_context, 0, sizeof(api_context));
-            free(env_copy);
-            exit(EXIT_FAILURE);
+
+
+static void wipe_sensitive(void) {
+    memset(api_key, 0, sizeof(api_key));
+    memset(api_model, 0, sizeof(api_model));
+    memset(api_user, 0, sizeof(api_user));
+    memset(api_context, 0, sizeof(api_context));
+}
+
+static bool load_env_vars(void) {
+    for (int i = 0; environ[i]; i++) {
+        char *env_copy = strdup(environ[i]);
+        if (!env_copy) return false;
+        char *key = strtok(env_copy, "=");
+        char *value = strtok(NULL, "");
+        if (key != NULL && value != NULL) {
+            if (strcmp(key, "FEED_URL") == 0 && strlen(value) < sizeof(api_url)) {
+                strcpy(api_url, value);
+            } else if (strcmp(key, "FEED_KEY") == 0 && strlen(value) < sizeof(api_key)) {
+                strcpy(api_key, value);
+            } else if (strcmp(key, "FEED_MODEL") == 0 && strlen(value) > 0 && strlen(value) < sizeof(api_model)) {
+                strcpy(api_model, value);
+            } else if (strcmp(key, "FEED_USER") == 0 && strlen(value) < sizeof(api_user)) {
+                strcpy(api_user, value);
+            } else if (strcmp(key, "FEED_CONTEXT") == 0 && strlen(value) < sizeof(api_context)) {
+                strcpy(api_context, value);
+            }
         }
- }
-	if (key && strcmp(key,"FEED_KEY")==0) {
-		if (value && strlen(value) < sizeof(api_key)) {
-			strncpy(api_key, value, sizeof(api_key) - 1);
-			api_key[sizeof(api_key) - 1] = '\0';
-        } else {
-            fprintf(stderr, "FEED_KEY value too long or null\n");
-            memset(api_key, 0, sizeof(api_key));
-            memset(api_model, 0, sizeof(api_model));
-            memset(api_user, 0, sizeof(api_user));
-            memset(api_context, 0, sizeof(api_context));
-            free(env_copy);
-            exit(EXIT_FAILURE);
-        }
-	}
- 	if (key && strcmp(key,"FEED_MODEL")==0) {
- 		if (value && strlen(value) > 0 && strlen(value) < sizeof(api_model)) {
- 			strncpy(api_model, value, sizeof(api_model) - 1);
- 			api_model[sizeof(api_model) - 1] = '\0';
- 		}
- 		// If invalid or not set, keep default
- 	}
-  // FEED_USER is OPTIONAL, some API system are too rigid
- 	if (key && strcmp(key,"FEED_USER")==0) {
- 		if (value && strlen(value) < sizeof(api_user)) {
- 			strncpy(api_user, value, sizeof(api_user) - 1);
- 			api_user[sizeof(api_user) - 1] = '\0';
- 		}
- 	}
- 	if (key && strcmp(key,"FEED_CONTEXT")==0) {
- 		if (value && strlen(value) < sizeof(api_context)) {
- 			strncpy(api_context, value, sizeof(api_context) - 1);
- 			api_context[sizeof(api_context) - 1] = '\0';
- 		}
- 	}
- 	free(env_copy);
+        free(env_copy);
     }
-    if (strlen(api_key)==0) {
-	fprintf(stderr, "No FEED_KEY exported\n");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
-        exit(EXIT_FAILURE);
-    }
-    if (strlen(api_model)==0) {
-	fprintf(stderr, "No FEED_MODEL exported\n");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
-        exit(EXIT_FAILURE);
-    }
-    if (strlen(api_url)==0) {
-	fprintf(stderr, "No FEED_URL exported\n");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
-        exit(EXIT_FAILURE);
-    }
-    // === Escape user input for safe JSON ===
-    char escaped[BUFFER_SIZE / 4];
+    return strlen(api_key) > 0 && strlen(api_model) > 0 && strlen(api_url) > 0;
+}
+
+/*@null@*/ static char *escape_prompt(const char *prompt) {
+    char *escaped = malloc(BUFFER_SIZE / 4);
+    if (!escaped) return NULL;
     size_t j = 0;
-    
-    for (const char *p = prompt; *p && j < sizeof(escaped) - 10; ++p) {
+    for (const char *p = prompt; *p != '\0' && j < sizeof(escaped) - 10; p++) {
         switch (*p) {
-            case '"':  escaped[j++] = '\\'; escaped[j++] = '"'; break;
+            case '"': escaped[j++] = '\\'; escaped[j++] = '"'; break;
             case '\\': escaped[j++] = '\\'; escaped[j++] = '\\'; break;
             case '\n': escaped[j++] = '\\'; escaped[j++] = 'n'; break;
             case '\r': escaped[j++] = '\\'; escaped[j++] = 'r'; break;
             case '\t': escaped[j++] = '\\'; escaped[j++] = 't'; break;
-            default:   escaped[j++] = *p;
+            default: escaped[j++] = *p;
         }
     }
     escaped[j] = '\0';
-    // Build user message JSON
+    return escaped;
+}
+
+int main(int argc, char **argv) {
+    char *prompt = NULL;
+    int i = 1;
+    while (i < argc) {
+        if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
+            debug = true;
+        } else if (!prompt) {
+            prompt = argv[i];
+        } else {
+            fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
+            return 1;
+        }
+        i++;
+    }
+    if (!prompt) {
+        fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
+        return 1;
+    }
+
+    if (!load_env_vars()) {
+        fprintf(stderr, "Missing or invalid FEED_URL, FEED_KEY, or FEED_MODEL\n");
+        wipe_sensitive();
+        return 1;
+    }
+
+    char *escaped = escape_prompt(prompt);
+    if (!escaped) {
+        fprintf(stderr, "Memory allocation failed\n");
+        wipe_sensitive();
+        return 1;
+    }
+
     char user_message[BUFFER_SIZE / 4];
-    snprintf(user_message, sizeof(user_message), "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}", api_user, escaped);
-    // Send the response
-    // === Build curl args ===
+    (void)snprintf(user_message, sizeof(user_message), "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}", api_user, escaped);
+
     char auth_header[2048];
     int written = snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
     if (written >= (int)sizeof(auth_header)) {
         fprintf(stderr, "Auth header too long\n");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
+
     char json_data[BUFFER_SIZE];
     written = snprintf(json_data, sizeof(json_data),
         "{\"model\": \"%s\",\"system\": \"%s\",\"messages\":[%s]}",
-        api_model, api_context, user_message); 
+        api_model, api_context, user_message);
     if (written >= (int)sizeof(json_data)) {
         fprintf(stderr, "JSON data too long\n");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
+
     if (debug) {
         printf("Debug: api_url: '%s'\n", api_url);
         printf("Debug: JSON data: %s\n", json_data);
     }
+
     char *args[] = {"curl", "-s", "--max-time", "3600", api_url, "-H", "Content-Type: application/json", "-H", auth_header, "-d", json_data, NULL};
-    // Create pipe and fork
+
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("pipe failed");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
+
     pid_t pid = fork();
     if (pid == -1) {
         perror("fork failed");
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        (void)close(pipefd[0]);
+        (void)close(pipefd[1]);
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
+
     FILE *fp = NULL;
     if (pid == 0) {
-        // child
         (void)close(pipefd[0]);
         (void)dup2(pipefd[1], STDOUT_FILENO);
         (void)close(pipefd[1]);
@@ -385,84 +302,70 @@ int main(int argc, char **argv) {
         perror("execvp failed");
         exit(EXIT_FAILURE);
     } else {
-        // parent
         (void)close(pipefd[1]);
         fp = fdopen(pipefd[0], "r");
         if (!fp) {
             perror("fdopen failed");
             (void)close(pipefd[0]);
-            memset(api_key, 0, sizeof(api_key));
-            memset(api_model, 0, sizeof(api_model));
-            memset(api_user, 0, sizeof(api_user));
-            memset(api_context, 0, sizeof(api_context));
+            free(escaped);
+            wipe_sensitive();
             return 1;
         }
     }
-    // Print the prompt
-    (void)printf("\x1b[2J\x1b[H\x1b[34m");
+
+    printf("\x1b[2J\x1b[H\x1b[34m");
     print_folded(prompt, 72);
-    (void)printf("\x1b[0m\n\n");
-    // Read the Response
-    // === Read entire JSON response into memory (most robust approach) ===
+    printf("\x1b[0m\n\n");
+
     char *response = malloc(BUFFER_SIZE);
     if (!response) {
         fprintf(stderr, "Memory allocation failed\n");
-        if (fp) fclose(fp);
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        fclose(fp);
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
+
     size_t len = fread(response, 1, BUFFER_SIZE - 1, fp);
     response[len] = '\0';
+    (void)fclose(fp);
+
     if (debug) {
         printf("Debug: API response: %s\n", response);
     }
-    if (fp) (void)fclose(fp);
+
     int status;
     (void)waitpid(pid, &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (WIFEXITED(status) == 0 || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "curl failed\n");
-        if (fp) fclose(fp);
         free(response);
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
-    // === Extract content using state machine parser ===
+
     char *content = extract_content_from_json(response);
     if (!content) {
-        // Check for error response
         if (strstr(response, "\"error\"")) {
-            printf("API returned an error: %s\n",response);
+            printf("API returned an error: %s\n", response);
         } else {
             printf("No content in response.\n");
             printf("If this persists, try using just your first name in FEED_USER or unset it for anonymous mode.\n");
         }
-        if (fp) fclose(fp);
         free(response);
-        memset(api_key, 0, sizeof(api_key));
-        memset(api_model, 0, sizeof(api_model));
-        memset(api_user, 0, sizeof(api_user));
-        memset(api_context, 0, sizeof(api_context));
+        free(escaped);
+        wipe_sensitive();
         return 1;
     }
-    
-    // Print the extracted content with proper formatting
+
+    save_code_blocks(content, prompt);
+
     print_folded(content, 72);
     (void)putchar('\n');
-    
+
     free(content);
     free(response);
-
-    // Clear sensitive data from memory
-    memset(api_key, 0, sizeof(api_key));
-    memset(api_model, 0, sizeof(api_model));
-    memset(api_user, 0, sizeof(api_user));
-    memset(api_context, 0, sizeof(api_context));
-
+    free(escaped);
+    wipe_sensitive();
     return 0;
 }
