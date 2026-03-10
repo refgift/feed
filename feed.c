@@ -16,25 +16,58 @@ extern char **environ;
 // Returns a newly allocated string with the content, or NULL on error
 /*@null@*/ static char * extract_content_from_json(const char *json) {
     enum {
-        SEEK_MESSAGE,   // Looking for "message" key
+        SEEK_CHOICES,   // Looking for "choices" key
+        SEEK_ARRAY,     // Looking for [ after choices
+        SEEK_OBJECT,    // Looking for { in array
+        SEEK_MESSAGE,   // Looking for "message" key inside object
         SEEK_CONTENT,   // Looking for "content" key inside message
         SEEK_COLON,     // Looking for : after "content"
         SEEK_VALUE,     // Skipping whitespace before value
         IN_STRING,      // Inside the quoted string (actual content)
         ESCAPE,         // Processing escape sequence
         DONE            // Found and parsed content
-    } state = SEEK_MESSAGE;
+    } state = SEEK_CHOICES;
     
     char *content = malloc(BUFFER_SIZE);
     if (!content) return NULL;
     
     int content_idx = 0;    // Index in content buffer
     const char *p = json;
-    
-    while (*p) {
+
+    while (*p != '\0') {
         switch (state) {
+            case SEEK_CHOICES:
+                // Find "choices" key at root level
+                if (*p == '"' && strncmp(p + 1, "choices", 7) == 0) {
+                    p += 8;  // skip "choices"
+                    state = SEEK_ARRAY;
+                } else {
+                    p++;
+                }
+                break;
+
+            case SEEK_ARRAY:
+                // Find [ after choices
+                if (*p == '[') {
+                    state = SEEK_OBJECT;
+                }
+                p++;
+                break;
+
+            case SEEK_OBJECT:
+                // Find { in array
+                if (*p == '{') {
+                    state = SEEK_MESSAGE;
+                } else if (*p == ']') {
+                    // Empty array
+                    free(content);
+                    return NULL;
+                }
+                p++;
+                break;
+
             case SEEK_MESSAGE:
-                // Find "message" key (typically at root level)
+                // Find "message" key inside object
                 if (*p == '"' && strncmp(p + 1, "message", 7) == 0) {
                     p += 8;  // skip "message"
                     state = SEEK_CONTENT;
@@ -135,7 +168,7 @@ extern char **environ;
 }
 static void print_folded(const char *text, int width) {
     const char *p = text;
-    while (*p) {
+    while (*p != '\0') {
         (void)printf("    ");  // 4-char left margin
         // Skip leading spaces on this line
         while (*p && isspace((unsigned char)*p) && *p != '\n') p++;
@@ -174,14 +207,23 @@ static char * key;
 static char * value;
 static char api_url[1024] = "";
 static char api_key[1024] = "";
-static char api_model[1024] = "";
-static char api_user[1024] = "";
+static char api_model[1024] = "grok-1";
+static char api_user[1024] = "Anonymous";
+static char api_context[1024] = "You are Grok, a helpful and maximally truthful AI built by xAI.";
+static bool debug = false;
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s \"your prompt here\"\n", argv[0]);
+    char *prompt;
+    if (argc == 3 && (strcmp(argv[1], "--debug") == 0 || strcmp(argv[1], "-d") == 0)) {
+        debug = true;
+        prompt = argv[2];
+    } else if (argc == 2) {
+        prompt = argv[1];
+    } else {
+        fprintf(stderr, "Usage: %s [--debug|-d] \"your prompt here\"\n", argv[0]);
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     for (int i=0; environ[i]!=0; i++) {
@@ -197,46 +239,58 @@ int main(int argc, char **argv) {
 		if (value && strlen(value) < sizeof(api_url)) {
 			strncpy(api_url, value, sizeof(api_url) - 1);
 			api_url[sizeof(api_url) - 1] = '\0';
-		} else {
-			fprintf(stderr, "FEED_URL value too long or null\n");
-			free(env_copy);
-			exit(EXIT_FAILURE);
-		}
+        } else {
+            fprintf(stderr, "FEED_URL value too long or null\n");
+            memset(api_key, 0, sizeof(api_key));
+            memset(api_model, 0, sizeof(api_model));
+            memset(api_user, 0, sizeof(api_user));
+            memset(api_context, 0, sizeof(api_context));
+            free(env_copy);
+            exit(EXIT_FAILURE);
+        }
  }
 	if (key && strcmp(key,"FEED_KEY")==0) {
 		if (value && strlen(value) < sizeof(api_key)) {
 			strncpy(api_key, value, sizeof(api_key) - 1);
 			api_key[sizeof(api_key) - 1] = '\0';
-		} else {
-			fprintf(stderr, "FEED_KEY value too long or null\n");
-			free(env_copy);
-			exit(EXIT_FAILURE);
-		}
+        } else {
+            fprintf(stderr, "FEED_KEY value too long or null\n");
+            memset(api_key, 0, sizeof(api_key));
+            memset(api_model, 0, sizeof(api_model));
+            memset(api_user, 0, sizeof(api_user));
+            memset(api_context, 0, sizeof(api_context));
+            free(env_copy);
+            exit(EXIT_FAILURE);
+        }
 	}
-	if (key && strcmp(key,"FEED_MODEL")==0) {
-		if (value && strlen(value) < sizeof(api_model)) {
-			strncpy(api_model, value, sizeof(api_model) - 1);
-			api_model[sizeof(api_model) - 1] = '\0';
-		} else {
-			fprintf(stderr, "FEED_MODEL value too long or null\n");
-			free(env_copy);
-			exit(EXIT_FAILURE);
-		}
-	}
- // FEED_USER is OPTIONAL, some API system are too rigid
-	if (key && strcmp(key,"FEED_USER")==0) {
-		if (value && strlen(value) < sizeof(api_user)) {
-			strncpy(api_user, value, sizeof(api_user) - 1);
-			api_user[sizeof(api_user) - 1] = '\0';
-		}
-	}
-	free(env_copy);
+ 	if (key && strcmp(key,"FEED_MODEL")==0) {
+ 		if (value && strlen(value) > 0 && strlen(value) < sizeof(api_model)) {
+ 			strncpy(api_model, value, sizeof(api_model) - 1);
+ 			api_model[sizeof(api_model) - 1] = '\0';
+ 		}
+ 		// If invalid or not set, keep default
+ 	}
+  // FEED_USER is OPTIONAL, some API system are too rigid
+ 	if (key && strcmp(key,"FEED_USER")==0) {
+ 		if (value && strlen(value) < sizeof(api_user)) {
+ 			strncpy(api_user, value, sizeof(api_user) - 1);
+ 			api_user[sizeof(api_user) - 1] = '\0';
+ 		}
+ 	}
+ 	if (key && strcmp(key,"FEED_CONTEXT")==0) {
+ 		if (value && strlen(value) < sizeof(api_context)) {
+ 			strncpy(api_context, value, sizeof(api_context) - 1);
+ 			api_context[sizeof(api_context) - 1] = '\0';
+ 		}
+ 	}
+ 	free(env_copy);
     }
     if (strlen(api_key)==0) {
 	fprintf(stderr, "No FEED_KEY exported\n");
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         exit(EXIT_FAILURE);
     }
     if (strlen(api_model)==0) {
@@ -244,13 +298,22 @@ int main(int argc, char **argv) {
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
+        exit(EXIT_FAILURE);
+    }
+    if (strlen(api_url)==0) {
+	fprintf(stderr, "No FEED_URL exported\n");
+        memset(api_key, 0, sizeof(api_key));
+        memset(api_model, 0, sizeof(api_model));
+        memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         exit(EXIT_FAILURE);
     }
     // === Escape user input for safe JSON ===
     char escaped[BUFFER_SIZE / 4];
     size_t j = 0;
     
-    for (const char *p = argv[1]; *p && j < sizeof(escaped) - 10; ++p) {
+    for (const char *p = prompt; *p && j < sizeof(escaped) - 10; ++p) {
         switch (*p) {
             case '"':  escaped[j++] = '\\'; escaped[j++] = '"'; break;
             case '\\': escaped[j++] = '\\'; escaped[j++] = '\\'; break;
@@ -261,6 +324,9 @@ int main(int argc, char **argv) {
         }
     }
     escaped[j] = '\0';
+    // Build user message JSON
+    char user_message[BUFFER_SIZE / 4];
+    snprintf(user_message, sizeof(user_message), "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}", api_user, escaped);
     // Send the response
     // === Build curl args ===
     char auth_header[2048];
@@ -270,26 +336,24 @@ int main(int argc, char **argv) {
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     char json_data[BUFFER_SIZE];
-    if (strlen(api_user)!=0) {
     written = snprintf(json_data, sizeof(json_data),
-        "{\"model\": \"%s\",\"system\": \"no contexts is a programming enabler\",\"messages\":["
-        "{\"role\": \"user\",\"name\" :\"%s\",\"content\":\"%s\"}]}",
-        api_model, api_user, escaped);
-    } else {    
-       written = snprintf(json_data, sizeof(json_data), 
-        "{\"model\":\"%s\",\"messages\":["
-        "{\"role\":\"user\",\"content\":\"%s\"}]}",
-        api_model, escaped);
-    } 
+        "{\"model\": \"%s\",\"system\": \"%s\",\"messages\":[%s]}",
+        api_model, api_context, user_message); 
     if (written >= (int)sizeof(json_data)) {
         fprintf(stderr, "JSON data too long\n");
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
+    }
+    if (debug) {
+        printf("Debug: api_url: '%s'\n", api_url);
+        printf("Debug: JSON data: %s\n", json_data);
     }
     char *args[] = {"curl", "-s", "--max-time", "3600", api_url, "-H", "Content-Type: application/json", "-H", auth_header, "-d", json_data, NULL};
     // Create pipe and fork
@@ -299,6 +363,7 @@ int main(int argc, char **argv) {
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     pid_t pid = fork();
@@ -307,6 +372,7 @@ int main(int argc, char **argv) {
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     FILE *fp = NULL;
@@ -328,35 +394,42 @@ int main(int argc, char **argv) {
             memset(api_key, 0, sizeof(api_key));
             memset(api_model, 0, sizeof(api_model));
             memset(api_user, 0, sizeof(api_user));
+            memset(api_context, 0, sizeof(api_context));
             return 1;
         }
     }
     // Print the prompt
     (void)printf("\x1b[2J\x1b[H\x1b[34m");
-    print_folded(argv[1], 72);
+    print_folded(prompt, 72);
     (void)printf("\x1b[0m\n\n");
     // Read the Response
     // === Read entire JSON response into memory (most robust approach) ===
     char *response = malloc(BUFFER_SIZE);
     if (!response) {
         fprintf(stderr, "Memory allocation failed\n");
-        if (fp) (void)fclose(fp);
+        if (fp) fclose(fp);
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     size_t len = fread(response, 1, BUFFER_SIZE - 1, fp);
     response[len] = '\0';
+    if (debug) {
+        printf("Debug: API response: %s\n", response);
+    }
     if (fp) (void)fclose(fp);
     int status;
     (void)waitpid(pid, &status, 0);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "curl failed\n");
+        if (fp) fclose(fp);
         free(response);
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     // === Extract content using state machine parser ===
@@ -367,11 +440,14 @@ int main(int argc, char **argv) {
             printf("API returned an error: %s\n",response);
         } else {
             printf("No content in response.\n");
+            printf("If this persists, try using just your first name in FEED_USER or unset it for anonymous mode.\n");
         }
+        if (fp) fclose(fp);
         free(response);
         memset(api_key, 0, sizeof(api_key));
         memset(api_model, 0, sizeof(api_model));
         memset(api_user, 0, sizeof(api_user));
+        memset(api_context, 0, sizeof(api_context));
         return 1;
     }
     
@@ -381,11 +457,12 @@ int main(int argc, char **argv) {
     
     free(content);
     free(response);
-    
+
     // Clear sensitive data from memory
     memset(api_key, 0, sizeof(api_key));
     memset(api_model, 0, sizeof(api_model));
     memset(api_user, 0, sizeof(api_user));
-    
+    memset(api_context, 0, sizeof(api_context));
+
     return 0;
 }
