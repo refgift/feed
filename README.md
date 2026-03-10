@@ -1,3 +1,6 @@
+<img width="819" height="661" alt="Screenshot From 2026-03-10 13-33-26" src="https://github.com/user-attachments/assets/cab6fd79-9809-4329-87da-a3a9ed1e69ab" />
+
+
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
 ## Limitation
@@ -70,6 +73,3 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
   - export MANPATH="$HOME/man:$MANPATH"
   - mandb ~/man
   - Add the export to ~/.bashrc for permanence.
-
-
-<img width="896" height="1072" alt="Screenshot From 2026-03-08 20-21-10" src="https://github.com/user-attachments/assets/55e13e72-10e6-46f1-a00a-cc5a50715090" />
