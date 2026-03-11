@@ -1,9 +1,14 @@
 <img width="819" height="661" alt="Screenshot From 2026-03-10 13-33-26" src="https://github.com/user-attachments/assets/cab6fd79-9809-4329-87da-a3a9ed1e69ab" />
 
-
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
+
 ## Limitation
-- Tested with xAI Grok API. Compatible with OpenAI-style APIs. Uses /chat/completions instead of /responses
+- Tested with xAI Grok API. Compatible with OpenAI-style APIs. 
+- The AI URL has the old and the new method. This feed utility uses /chat/completions instead of /responses for
+  the ending of the FEED_URL. There is also the /tts ending of the URL but this feed is just a text
+  interface tool. It let's you converse, program, many things, but text. Even video and audio
+  can be transferred as base 64 files, which is a text format. Linux has the utilities for that. 
+
 ## Usage
 Companies like xAi and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-1 which is different from opus. Model names and api key are the gate and
@@ -20,6 +25,7 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - Use --debug or -d for debugging: prints API URL, JSON payload, and raw response.
 - Code blocks in responses are automatically extracted and saved to files.
 - Output is formatted with uniform spacing (like fmt -u) for better readability.
+
 ## Advanced Usage
 - **Sending file contents**: `feed "$(cat README.md)"` to include file content in the prompt.
 - **Redirecting output**: `feed "How to shower without soap" > shower_advice.txt` to save response to a file.
