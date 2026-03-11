@@ -1,9 +1,7 @@
 <img width="819" height="661" alt="Screenshot From 2026-03-10 13-33-26" src="https://github.com/user-attachments/assets/cab6fd79-9809-4329-87da-a3a9ed1e69ab" />
-
-
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 ## Limitation
-- Tested with xAI Grok API. Compatible with OpenAI-style APIs.
+- Tested with xAI Grok API. Compatible with OpenAI-style APIs. Uses /chat/completions instead of /responses
 ## Usage
 Companies like xAi and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-1 which is different from opus. Model names and api key are the gate and
