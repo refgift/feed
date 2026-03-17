@@ -1,15 +1,16 @@
 #include <stdio.h>
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <wait.h>
+#include <ctype.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-    /* Forward declarations for splint */
+/* Forward declarations for splint */
 extern char *strdup (const char *s);
 extern FILE *fdopen (int fd, const char *mode);
 extern char **environ;
@@ -18,14 +19,13 @@ extern char **environ;
 static char *
 format_text_spacing (const char *text)
 {
-  if (!text)
-    return NULL;
-  size_t len = strlen (text);
-  char *result = malloc (len * 2 + 1);  // Allocate extra space for potential  additions
+  if (strlen(text)==0) return (char *) text;
+  int len = (int) strlen (text);
+  char *result = malloc ((size_t) (len * 2 + 1));  // Allocate extra space for potential  additions
   if (!result)
-    return NULL;
-  size_t j = 0;
-  for (size_t i = 0; i < len; ++i)
+    return (char *) NULL;
+  int j = 0;
+  for (int i = 0; i < len; ++i)
     {
       result[j++] = text[i];
       if ((text[i] == '.' || text[i] == '?' || text[i] == '!') &&
@@ -57,9 +57,9 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
         ++ptr;
       if (*ptr == '\n')
         ++ptr;
-      char lang[32] = { 0 };
-      size_t lang_len = ptr - lang_start - 1;   // Exclude newline
-      if (lang_len < sizeof (lang))
+      char lang[32]="";
+      size_t lang_len = (size_t) (ptr - lang_start - 1);   // Exclude newline
+      if (lang_len < strlen (lang))
         {
           memcpy (lang, lang_start, lang_len);
         }
@@ -68,30 +68,30 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
       const char *code_end = strstr (ptr, "```");
       if (!code_end)
         break;
-      size_t code_len = code_end - code_start;
-      char *code = malloc (code_len + 1);
+      size_t code_len = (size_t) (code_end - code_start);
+      char *code = malloc ((size_t) (code_len + 1));
       if (!code)
         break;
       memcpy (code, code_start, code_len);
       code[code_len] = '\0';
       // Determine extension
       char ext[8] = ".txt";
-      if (strcasecmp (lang, "c") == 0 || strstr (lang, "c"))
+      if (strcasecmp (lang, "c") == 0 || strstr (lang, "c")==0)
         strcpy (ext, ".c");
-      else if (strcasecmp (lang, "python") == 0 || strstr (lang, "py"))
+      else if (strcasecmp (lang, "python") == 0 || strstr (lang, "py")==0)
         strcpy (ext, ".py");
-      else if (strcasecmp (lang, "javascript") == 0 || strstr (lang, "js"))
+      else if (strcasecmp (lang, "javascript") == 0 || strstr (lang, "js")==0)
         strcpy (ext, ".js");
       // Parse filename from prompt
-      char filename[256] = { 0 };
+      char filename[256] = "";
       const char *save_pos = strstr (prompt, "save as");
-      if (save_pos)
+      if (save_pos!=NULL)
         {
           save_pos += 8;        // Skip "save as "
-          const char *name_end = strstr (save_pos, " ");
-          if (!name_end)
+          const char *name_end = strcasestr (save_pos, " ");
+          if (name_end!=NULL)
             name_end = save_pos + strlen (save_pos);
-          size_t name_len = name_end - save_pos;
+          size_t name_len = (size_t) (name_end - save_pos);
           if (name_len < sizeof (filename) - 10)
             {
               memcpy (filename, save_pos, name_len);
@@ -150,10 +150,10 @@ extract_json_content (const char *json)
   if (!json)
     return NULL;
   const char *ptr = strstr (json, "\"content\"");
-  if (!ptr)
+  if (ptr==NULL)
     return NULL;
   ptr = strstr (ptr, "\":");
-  if (!ptr)
+  if (ptr==NULL)
     return NULL;
   ptr += 2;
   while (*ptr && isspace ((unsigned char) *ptr))
@@ -161,10 +161,10 @@ extract_json_content (const char *json)
   if (*ptr != '"')
     return NULL;
   ++ptr;                        // Skip opening quote
-  char *content = malloc (BUFFER_SIZE);
+  char *content = malloc ((size_t) BUFFER_SIZE);
   if (!content)
     return NULL;
-  size_t idx = 0;
+  int idx = 0;
   while (*ptr && *ptr != '"' && idx < BUFFER_SIZE - 1)
     {
       if (*ptr == '\\')
@@ -217,33 +217,33 @@ print_wrapped (const char *text, int width)
         }
       if (!*ptr || *ptr == '\n')
         {
-          fwrite (line_start, 1, ptr - line_start, stdout);
+          (void) fwrite (line_start, 1, (size_t)(ptr - line_start), stdout);
           if (*ptr == '\n')
-            putchar ('\n');
+            (void) putchar ('\n');
           if (*ptr)
             ++ptr;
         }
       else if (last_space)
         {
-          fwrite (line_start, 1, last_space - line_start + 1, stdout);
-          putchar ('\n');
+          (void) fwrite (line_start, 1, (size_t) (last_space - line_start + 1), stdout);
+          (void) putchar ('\n');
           ptr = last_space + 1;
         }
       else
         {
-          fwrite (line_start, 1, width, stdout);
-          putchar ('\n');
+          (void) fwrite (line_start, 1, (size_t) width, stdout);
+          (void) putchar ('\n');
           ptr = line_start + width;
         }
     }
 }
     // Global config variables
-static char api_url[1024] = { 0 };
-static char api_key[1024] = { 0 };
+static char api_url[1024]="";
+static char api_key[1024]="";
 static char api_model[1024] = "grok-1";
 static char api_user[1024] = "Anonymous";
 static char api_context[1024] =
-  "You are Grok, a helpful and maximally truthful AI built by xAI.";
+  "You are a helpful and maximally truthful AI.";
 static bool debug_mode = false;
     // Securely wipe sensitive data
 static void
@@ -265,7 +265,7 @@ load_config (void)
         return false;
       char *key = strtok (env_copy, "=");
       char *value = strtok (NULL, "");
-      if (key && value)
+      if (strlen(key)>0 && strlen(value)>0)
         {
           if (strcmp (key, "FEED_URL") == 0
               && strlen (value) < sizeof (api_url))
@@ -303,11 +303,11 @@ escape_json_string (const char *str)
 {
   if (!str)
     return NULL;
-  char *escaped = malloc (BUFFER_SIZE / 4);
+  char *escaped = calloc ((size_t) (BUFFER_SIZE / 4), strlen(str));
   if (!escaped)
     return NULL;
   size_t j = 0;
-  for (const char *p = str; *p && j < sizeof (escaped) - 10; ++p)
+  for (const char *p = str; *p && j < strlen(escaped) - 10; ++p)
     {
       switch (*p)
         {
@@ -424,7 +424,7 @@ main (int argc, char *argv[])
       clear_sensitive_data ();
       return EXIT_FAILURE;
     }
-  pid_t child_pid = fork ();
+  __pid_t child_pid = fork ();
   if (child_pid == -1)
     {
       perror ("fork");
@@ -463,7 +463,7 @@ main (int argc, char *argv[])
   print_wrapped (formatted_prompt ? formatted_prompt : prompt, 75);
   printf ("\x1b[0m\n\n");
   free (formatted_prompt);
-  char *response = malloc (BUFFER_SIZE);
+  char *response = malloc ((size_t) BUFFER_SIZE);
   if (!response)
     {
       fprintf (stderr, "Memory error\n");
@@ -480,8 +480,9 @@ main (int argc, char *argv[])
       printf ("Debug: Response: %s\n", response);
     }
   int status;
-  waitpid (child_pid, &status, 0);
-  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0)
+  __pid_t w = waitpid ((__pid_t)child_pid, &status, 0);
+  if (w==-1) perror("child process failed");
+  if (WIFEXITED (status) != 0 || WEXITSTATUS (status) != 0)
     {
       fprintf (stderr, "curl failed\n");
       free (response);
@@ -510,11 +511,12 @@ main (int argc, char *argv[])
   extract_and_save_code_blocks (content, prompt);
   char *formatted_content = format_text_spacing (content);
   print_wrapped (formatted_content ? formatted_content : content, 75);
-  putchar ('\n');
+  int e  = putchar ('\n');
+  if (e==EOF) perror("EOF unexpected");
   free (formatted_content);
   free (content);
   free (response);
   free (escaped_prompt);
   clear_sensitive_data ();
-  return EXIT_SUCCESS;
+  return (int) EXIT_SUCCESS;
 }
