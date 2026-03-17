@@ -49,7 +49,11 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - A C compiler is necessary, gcc or clang are the names in the Linux world.
 ### Build Commands
 - cd into the feed directory
-- gcc feed.c -o feed 
+- gcc feed.c -o feed
+#### Advanced Build - uses chibicc C compiler by default others can be used.
+- make
+#### Uses the splint command, has to be installed
+- make lint
 ### Build Test
 - ./feed
 - Without arguments it will tell you to give it an argument.
