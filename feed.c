@@ -293,7 +293,7 @@ escape_json_string (const char *str)
   char *escaped = calloc ((size_t) (BUFFER_SIZE / 4), strlen(str));
   if (!escaped) return NULL;
   size_t j = 0;
-  for (const char *p = str; *p && j < strlen(escaped)-18; ++p)
+  for (const char *p = str; *p && j <BUFFER_SIZE/4 ; ++p)
     {
       switch (*p)
         {
