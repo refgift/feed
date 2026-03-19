@@ -1,6 +1,5 @@
 #include <stdio.h>
 #define _POSIX_C_SOURCE 200809L
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,7 +108,7 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
           snprintf (filename, sizeof (filename), "code%s", ext);
         }
       // Ensure uniqueness
-      char unique_name[256];
+      char unique_name[512];
       strcpy (unique_name, filename);
       int counter = 1;
       while (access (unique_name, F_OK) == 0)
@@ -149,11 +148,15 @@ extract_json_content (const char *json)
 {
   if (!json)
     return NULL;
+  // Find the content in the assistant message
   const char *ptr = strstr (json, "\"content\"");
-  if (ptr==NULL)
+  if (!ptr)
+    return NULL;
+  ptr = strstr (ptr, "\"text\"");
+  if (!ptr)
     return NULL;
   ptr = strstr (ptr, "\":");
-  if (ptr==NULL)
+  if (!ptr)
     return NULL;
   ptr += 2;
   while (*ptr && isspace ((unsigned char) *ptr))
@@ -241,9 +244,6 @@ print_wrapped (const char *text, int width)
 static char api_url[1024]="";
 static char api_key[1024]="";
 static char api_model[1024] = "grok-1";
-static char api_user[1024] = "Anonymous";
-static char api_context[1024] =
-  "You are a helpful and maximally truthful AI.";
 static bool debug_mode = false;
     // Securely wipe sensitive data
 static void
@@ -251,8 +251,6 @@ clear_sensitive_data (void)
 {
   memset (api_key, 0, sizeof (api_key));
   memset (api_model, 0, sizeof (api_model));
-  memset (api_user, 0, sizeof (api_user));
-  memset (api_context, 0, sizeof (api_context));
 }
     // Load configuration from environment
 static bool
@@ -265,7 +263,7 @@ load_config (void)
         return false;
       char *key = strtok (env_copy, "=");
       char *value = strtok (NULL, "");
-      if (strlen(key)>0 && strlen(value)>0)
+      if (key!=NULL&&strlen(key)>0 && value!=NULL&&strlen(value)>0)
         {
           if (strcmp (key, "FEED_URL") == 0
               && strlen (value) < sizeof (api_url))
@@ -282,17 +280,7 @@ load_config (void)
             {
               strcpy (api_model, value);
             }
-          else if (strcmp (key, "FEED_USER") == 0 && strlen (value) <
-                   sizeof (api_user))
-            {
-              strcpy (api_user, value);
-            }
-          else if (strcmp (key, "FEED_CONTEXT") == 0 && strlen (value) <
-                   sizeof (api_context))
-            {
-              strcpy (api_context, value);
-            }
-        }
+       }
       free (env_copy);
     }
   return api_key[0] && api_model[0] && api_url[0];
@@ -301,13 +289,11 @@ load_config (void)
 static char *
 escape_json_string (const char *str)
 {
-  if (!str)
-    return NULL;
+  if (!str) return NULL;
   char *escaped = calloc ((size_t) (BUFFER_SIZE / 4), strlen(str));
-  if (!escaped)
-    return NULL;
+  if (!escaped) return NULL;
   size_t j = 0;
-  for (const char *p = str; *p && j < strlen(escaped) - 10; ++p)
+  for (const char *p = str; *p && j < strlen(escaped)-18; ++p)
     {
       switch (*p)
         {
@@ -378,9 +364,7 @@ main (int argc, char *argv[])
     }
   char user_msg[BUFFER_SIZE / 4];
   if (snprintf
-      (user_msg, sizeof (user_msg),
-       "{\"role\":\"user\",\"name\":\"%s\",\"content\":\"%s\"}", api_user,
-       escaped_prompt) >= (int) sizeof (user_msg))
+      (user_msg, BUFFER_SIZE/4 ,"%s",escaped_prompt) >= BUFFER_SIZE/4)
     {
       fprintf (stderr, "User message too long\n");
       free (escaped_prompt);
@@ -389,33 +373,32 @@ main (int argc, char *argv[])
     }
   char auth_hdr[2048];
   if (snprintf
-      (auth_hdr, sizeof (auth_hdr), "Authorization: Bearer %s",
-       api_key) >= (int) sizeof (auth_hdr))
+      (auth_hdr, 2048, "Authorization: Bearer %s",api_key) >= 2048)
     {
       fprintf (stderr, "Auth header too long\n");
       free (escaped_prompt);
       clear_sensitive_data ();
       return EXIT_FAILURE;
     }
-  char json_payload[BUFFER_SIZE];
-  if (snprintf (json_payload, sizeof (json_payload),
-                "{\"model\":\"%s\",\"system\":\"%s\",\"messages\":[%s]}",
-                api_model, api_context,
-                user_msg) >= (int) sizeof (json_payload))
+   char json_payload[BUFFER_SIZE];
+    if (snprintf (json_payload, BUFFER_SIZE,
+                "{\"model\": \"%s\",\"input\": \"%s\"}",
+                api_model,user_msg)
+                >= BUFFER_SIZE)
     {
       fprintf (stderr, "JSON payload too long\n");
       free (escaped_prompt);
       clear_sensitive_data ();
       return EXIT_FAILURE;
     }
+  char *curl_args[] = { "curl", "-s", "--max-time", "3600", api_url, "-H",
+    "Content-Type: application/json", "-H", auth_hdr, "-d", json_payload, NULL
+  };
   if (debug_mode)
     {
       printf ("Debug: URL: %s\n", api_url);
       printf ("Debug: Payload: %s\n", json_payload);
     }
-  char *curl_args[] = { "curl", "-s", "--max-time", "3600", api_url, "-H",
-    "Content-Type: application/json", "-H", auth_hdr, "-d", json_payload, NULL
-  };
   int pipe_fds[2];
   if (pipe (pipe_fds) == -1)
     {
@@ -482,7 +465,7 @@ main (int argc, char *argv[])
   int status;
   __pid_t w = waitpid ((__pid_t)child_pid, &status, 0);
   if (w==-1) perror("child process failed");
-  if (WIFEXITED (status) != 0 || WEXITSTATUS (status) != 0)
+  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0)
     {
       fprintf (stderr, "curl failed\n");
       free (response);
