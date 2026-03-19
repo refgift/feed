@@ -3,17 +3,12 @@
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
 ## Limitation
-- Tested with xAI Grok API. Compatible with OpenAI-style APIs. 
-- The AI URL has the old and the new method. This feed utility uses /chat/completions instead of /responses for
-  the ending of the FEED_URL. There is also the /tts ending of the URL but this feed is just a text
-  interface tool. It let's you converse, program, many things, but text. Even video and audio
-  can be transferred as base 64 files, which is a text format. Linux has the utilities for that. 
+- Only works with REST API, the URL will end with /v1/responses.
 
 ## Usage
 Companies like xAi and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-1 which is different from opus. Model names and api key are the gate and
-feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI
-and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
+feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
 that is used is based on the OpenAI protocol, which is standardized.
 The interface to the AI server is stateless. Nothing happens outside of the prompt and response unless the
 client, like feed, keeps the "session" alive. You can use the command history and edit the prompt you previously
