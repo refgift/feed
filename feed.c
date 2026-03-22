@@ -37,6 +37,7 @@ static char api_url[1024] = "";
 static char api_key[1024] = "";
 static char api_model[1024] = "grok-beta";
 static int debug_mode = 0;
+static int stateless_mode = 0;
 static unsigned int pending_surrogate = 0;
 void
 free_json (JsonValue *v)
@@ -970,11 +971,32 @@ int
 main (int argc, char *argv[])
 {
   char *prompt = NULL;
+  int stateless_set = 0;
   for (int i = 1; i < argc; ++i)
     {
       if (strcmp (argv[i], "--debug") == 0 || strcmp (argv[i], "-d") == 0)
         {
           debug_mode = 1;
+        }
+      else if (strcmp (argv[i], "--stateless") == 0)
+        {
+          if (stateless_set)
+            {
+              fprintf (stderr, "Error: --stateless and --stateful are mutually exclusive\n");
+              return EXIT_FAILURE;
+            }
+          stateless_mode = 1;
+          stateless_set = 1;
+        }
+      else if (strcmp (argv[i], "--stateful") == 0)
+        {
+          if (stateless_set)
+            {
+              fprintf (stderr, "Error: --stateless and --stateful are mutually exclusive\n");
+              return EXIT_FAILURE;
+            }
+          stateless_mode = 0;
+          stateless_set = 1;
         }
       else if (!prompt)
         {
@@ -982,13 +1004,13 @@ main (int argc, char *argv[])
         }
       else
         {
-          fprintf (stderr, "Usage: %s [--debug|-d] \"prompt\"\n", argv[0]);
+          fprintf (stderr, "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n", argv[0]);
           return EXIT_FAILURE;
         }
     }
   if (!prompt)
     {
-      fprintf (stderr, "Usage: %s [--debug|-d] \"prompt\"\n", argv[0]);
+      fprintf (stderr, "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n", argv[0]);
       return EXIT_FAILURE;
     }
   if (!load_config ())
@@ -1005,8 +1027,8 @@ main (int argc, char *argv[])
       return EXIT_FAILURE;
     }
   char json_payload[BUFFER_SIZE];
-  snprintf (json_payload, BUFFER_SIZE, "{\"model\":\"%s\",\"input\":\"%s\"}",
-            api_model, escaped_prompt);
+  snprintf (json_payload, BUFFER_SIZE, "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}",
+            api_model, escaped_prompt, stateless_mode ? "false" : "true");
 // Payload length check removed (large buffer)
   if (strlen (json_payload) >= BUFFER_SIZE)
     {
