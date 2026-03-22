@@ -1,4 +1,5 @@
-<img width="819" height="661" alt="Screenshot From 2026-03-10 13-33-26" src="https://github.com/user-attachments/assets/cab6fd79-9809-4329-87da-a3a9ed1e69ab" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/cda51768-fdf8-440c-a3d6-0353708ed9cd" />
+
 
 # feed - a terminal based prompter for use with xAI's responses API.
 
