@@ -3,7 +3,7 @@
 # feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
 
 ## Limitation
-- Only works with REST API, the URL will end with /v1/responses.
+- Works with OpenAI-compatible APIs (e.g. xAI: https://api.x.ai/v1/chat/completions).
 
 ## Usage
 Companies like xAi and OpenAI sell access to their AI systems with API keys and payment by tokens used.
@@ -35,7 +35,9 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - Please be aware that these data are expensive and should be protected by the system with logout and
   automatic logout and screen lock. The Linux system has good system security, in my opinion.
 ### These are the variables that feed uses.
-- FEED_URL, FEED_KEY, and FEED_MODEL are required. If unset, feed will tell you and quit.
+- FEED_URL (required): https://api.x.ai/v1/chat/completions
+- FEED_KEY (required): your xAI API key (starts with `xai-...`)
+- FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
 - FEED_USER (optional): Name to use in prompts. Defaults to "Anonymous" if unset.
 - FEED_CONTEXT (optional): Context/system prompt for the AI. Defaults to "You are Grok, a helpful and maximally truthful AI built by xAI." if unset. Can be customized (e.g., for programming focus).
 ### Error Handling
