@@ -1,59 +1,143 @@
-.TH FEED 1 "March 2026" "feed" "User Commands"
-.SH NAME
-feed \- terminal based prompter for AI API services
-.SH SYNOPSIS
-.B feed
-[\fB--debug\fR | \fB-d\fR] [\fB--stateless\fR | \fB--stateful\fR] "\fIyour prompt here\fR"
-.SH DESCRIPTION
-feed is a command line tool that sends prompts to AI services using the OpenAI REST protocol. It is designed to work with APIs like xAI Grok and OpenAI. The tool takes a prompt, sends it to the configured AI model, and prints the formatted response with uniform spacing for readability. Code blocks in the response are automatically extracted and saved to files.
-.SH OPTIONS
-.TP
-.B --debug, -d
-Enable debug mode. Prints the API URL, JSON payload, and raw response from the API.
-.TP
-.B --stateless
-Enable stateless mode: sets "store":false in the API request for no response persistence.
-.TP
-.B --stateful
-Enable stateful mode explicitly: sets "store":true in the API request (default behavior).
-.SH ENVIRONMENT VARIABLES
-The following environment variables must be set:
-.TP
-.B FEED_URL
-The URL of the AI API endpoint.
-.TP
-.B FEED_KEY
-The API key for authentication.
-.TP
-.B FEED_MODEL
-The model name to use (e.g., grok-1).
 .PP
-Optional variables:
-.TP
-.B FEED_USER
-Name to use in prompts. Defaults to "Anonymous" if unset.
-.TP
-.B FEED_CONTEXT
-Context/system prompt for the AI. Defaults to "You are Grok, a helpful and maximally truthful AI built by xAI." if unset.
-.SH EXAMPLES
-.TP
-feed "What is the capital of France?"
-Send a simple prompt to the AI.
-.TP
-feed --debug "Explain quantum physics"
-Send a prompt with debug output enabled.
-.TP
-feed --stateless "What is AI?"
-Send a prompt in stateless mode for one-off queries.
-.TP
-feed "$(cat README.md)"
-Include file contents in the prompt.
-.TP
-feed "Write a hello world program in C"
-Send a prompt; code blocks in the response are automatically saved to files.
-.SH DEPENDENCIES
-Requires curl utility, which is available in most Linux distributions.
-.SH SEE ALSO
-curl(1)
-.SH AUTHOR
-feed is developed as an open source project.
+.SH feed \- a terminal based prompter for use with xAI\[cq]s responses API.
+.SS Limitation
+.IP \[bu] 2
+Works with xAI\[cq]s responses API (https://api.x.ai/v1/responses).
+.SS Usage
+Companies like xAi and OpenAI sell access to their AI systems with API
+keys and payment by tokens used.
+They have models, like grok\-1 which is different from opus.
+Model names and api key are the gate and feed is a user interface of the
+simplest form, a command line command that takes a prompt to send to an
+AI and wait for the AI response which is formatted and printed when it
+arrives.
+Then feed is done.
+The API that is used is xAI\[cq]s responses API.
+The interface to the AI server is stateless.
+Nothing happens outside of the prompt and response unless the client,
+like feed, keeps the \[lq]session\[rq] alive.
+You can use the command history and edit the prompt you previously sent
+and keep it going for a long time that way.
+feed can be called from shell programs.
+There might be utility to periodical use of feed to get a system
+analysis by building a prompt with system data collections.
+You could use ls \-lotr to find folders and tar files and make a prompt
+of that and ask for a shell script that tar compresses the folders, then
+meta\-tar the tarfiles.
+\- You can redirect the feed output to a file.
+\- Use \[en]debug or \-d for debugging: prints API URL, JSON payload,
+and raw response.
+\- Use \[en]stateless for stateless mode (store=false) or \[en]stateful
+for explicit stateful mode (default).
+\- Code blocks in responses are automatically extracted and saved to
+files.
+\- Output is formatted with uniform spacing (like fmt \-u) for better
+readability.
+.SS Advanced Usage
+.IP \[bu] 2
+\f[B]Sending file contents\f[R]:
+\f[CR]feed \[dq]$(cat README.md)\[dq]\f[R] to include file content in
+the prompt.
+.IP \[bu] 2
+\f[B]Redirecting output\f[R]:
+\f[CR]feed \[dq]How to shower without soap\[dq] > shower_advice.txt\f[R]
+to save response to a file.
+.IP \[bu] 2
+\f[B]Automatic code saving\f[R]:
+\f[CR]feed \[dq]Write a hello world in C\[dq]\f[R] automatically
+extracts code from \f[CR]c ...\f[R] blocks and saves to files (e.g.,
+food.c).
+.IP \[bu] 2
+\f[B]Stateless mode\f[R]:
+\f[CR]feed \-\-stateless \[dq]One\-off question\[dq]\f[R] to prevent
+response persistence.
+.IP \[bu] 2
+\f[B]Combining with shell\f[R]: Pipe or script with feed for automation,
+e.g.,
+\f[CR]echo \[dq]Analyze this log\[dq] | xargs feed > analysis.txt\f[R].
+## Dependencies
+.IP \[bu] 2
+uses the curl utility found in every Linux repository, if not already
+installed.
+## Configuration ### Shell Environment Variables
+.IP \[bu] 2
+To set these, from your terminal session you type export
+FEED_KEY=$XAI_API_KEY, for example, and press return.
+.IP \[bu] 2
+You can place the export of your AI session data in the .bashrc file
+that will set them for you.
+.IP \[bu] 2
+Please be aware that these data are expensive and should be protected by
+the system with logout and automatic logout and screen lock.
+The Linux system has good system security, in my opinion.
+### These are the variables that feed uses.
+.IP \[bu] 2
+FEED_URL (required): https://api.x.ai/v1/responses
+.IP \[bu] 2
+FEED_KEY (required): your xAI API key (starts with \f[CR]xai\-...\f[R])
+.IP \[bu] 2
+FEED_MODEL (required): grok\-beta (or grok\-2\-latest, etc.)
+### Command\-Line Options
+.IP \[bu] 2
+\[en]stateless: Sets \[lq]store\[rq]:false in the API request for
+stateless mode (no response persistence).
+.IP \[bu] 2
+\[en]stateful: Explicitly sets \[lq]store\[rq]:true for stateful mode
+(default behavior).
+\[en]stateless and \[en]stateful are mutually exclusive.
+.SS Build
+.IP \[bu] 2
+A C compiler is necessary, gcc or clang are the names in the Linux
+world.
+### Build Commands
+.IP \[bu] 2
+cd into the feed directory
+.IP \[bu] 2
+gcc feed.c \-o feed #### Advanced Build \- uses chibicc C compiler by
+default others can be used.
+.IP \[bu] 2
+make #### Uses the splint command, has to be installed
+.IP \[bu] 2
+make lint ### Build Test
+.IP \[bu] 2
+\&./feed
+.IP \[bu] 2
+Without arguments it will tell you to give it an argument.
+.IP \[bu] 2
+\&./feed \[en]debug \[lq]test prompt\[rq] (requires env vars set) to see
+debug output.
+## System Configuration
+.IP \[bu] 2
+Placing feed into the system PATH will allow it to be used outside of
+it\[cq]s build directory.
+.IP \[bu] 2
+sudo cp feed /usr/local/bin will allow you to depense with the ./
+.IP \[bu] 2
+mkdir \[ti]/bin then cp feed \[ti]/bin which can be done without
+security other than your authority.
+### Manpage Installation
+.IP \[bu] 2
+To enable \f[CR]man feed\f[R], install the manpage:
+.RS 2
+.IP \[bu] 2
+sudo mkdir \-p /usr/local/man/man1
+.IP \[bu] 2
+sudo cp feed.1 /usr/local/man/man1/
+.IP \[bu] 2
+sudo mandb
+.RE
+.IP \[bu] 2
+For local installation without sudo:
+.RS 2
+.IP \[bu] 2
+mkdir \-p \[ti]/man/man1
+.IP \[bu] 2
+cp feed.1 \[ti]/man/man1/
+.IP \[bu] 2
+export
+MANPATH=\[lq]\f[I]H\f[R]\f[I]O\f[R]\f[I]M\f[R]\f[I]E\f[R]/\f[I]m\f[R]\f[I]a\f[R]\f[I]n\f[R]:MANPATH\[rq]
+.IP \[bu] 2
+mandb \[ti]/man
+.IP \[bu] 2
+Add the export to \[ti]/.bashrc for permanence.
+.RE

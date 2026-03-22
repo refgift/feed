@@ -41,13 +41,10 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - FEED_URL (required): https://api.x.ai/v1/responses
 - FEED_KEY (required): your xAI API key (starts with `xai-...`)
 - FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
-- FEED_USER (optional): Name to use in prompts. Defaults to "Anonymous" if unset.
-- FEED_CONTEXT (optional): Context/system prompt for the AI. Defaults to "You are Grok, a helpful and maximally truthful AI built by xAI." if unset. Can be customized (e.g., for programming focus).
 ### Command-Line Options
 - --stateless: Sets "store":false in the API request for stateless mode (no response persistence).
 - --stateful: Explicitly sets "store":true for stateful mode (default behavior). --stateless and --stateful are mutually exclusive.
-### Error Handling
-- If "no content in response," try using just your first name in FEED_USER or unset it for anonymous mode.
+
 ## Build
 - A C compiler is necessary, gcc or clang are the names in the Linux world.
 ### Build Commands
