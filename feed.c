@@ -157,56 +157,52 @@ extract_json_content (const char *json)
 /* const char match[] = "\"object\":\"response\",\"output\":[{\"content\":[{\"type\":\"output_text\",\"text\"" */;
   if (json==NULL)
     return NULL;
-
   // Handle plain text errors (non-JSON)
   if (strstr(json, "{") == NULL) {
     printf("API plain error:\n%s\n", json);
     return NULL;
   }
-
   // Check for API error first
   const char *err_ptr = strstr(json, "\"error\"");
   if (err_ptr) {
-    const char *msg_ptr = strstr(err_ptr, "\"message\"");
-    if (msg_ptr) {
-      msg_ptr = strchr(msg_ptr, ':') + 1;
-      while (*msg_ptr && isspace((unsigned char)*msg_ptr)) ++msg_ptr;
-      if (*msg_ptr == '"') ++msg_ptr;
-      printf("API Error: ");
-      size_t printed = 0;
-      while (*msg_ptr && printed < 400 && *msg_ptr != '"') {
-        if (*msg_ptr == '\\') {
-          ++msg_ptr;
+    const char *val_ptr = strchr(err_ptr, ':');
+    if (val_ptr) {
+      ++val_ptr;
+      while (*val_ptr && isspace((unsigned char)*val_ptr)) ++val_ptr;
+      if (strncmp(val_ptr, "null", 4) != 0) {
+        // Not null, so it's an error
+        const char *msg_ptr = strstr(err_ptr, "\"message\"");
+        if (msg_ptr) {
+          msg_ptr = strchr(msg_ptr, ':') + 1;
+          while (*msg_ptr && isspace((unsigned char)*msg_ptr)) ++msg_ptr;
+          if (*msg_ptr == '"') ++msg_ptr;
+          printf("API Error: ");
+          size_t printed = 0;
+          while (*msg_ptr && printed < 400 && *msg_ptr != '"') {
+            if (*msg_ptr == '\\') {
+              ++msg_ptr;
+            }
+            putchar(*msg_ptr);
+            ++msg_ptr;
+            printed++;
+          }
+          printf("\n");
+        } else {
+          printf("API error response (no message).\n");
         }
-        putchar(*msg_ptr);
-        ++msg_ptr;
-        printed++;
+        return NULL;
       }
-      printf("\n");
-    } else {
-      printf("API error response (no message).\n");
+      // If "error" is null, continue to content extraction
     }
-    return NULL;
   }
-
-  const char *ptr = strstr (json, "\"content\"");
-  if (!ptr)
-    ptr = strstr (json, "\"text\"");
+  const char *ptr = strstr (json, "\"text\":\"");
   if (!ptr) {
-    fprintf(stderr, "No \"content\" or \"text\" field found in API response.\\n");
+    fprintf(stderr, "No \"text\" field found in API response.\\n");
     if (debug_mode)
       printf("Response preview (first 900 chars):\\n%.900s\\n", json);
     return NULL;
   }
-  ptr = strchr(ptr, ':');
-  if (!ptr) return NULL;
-  ++ptr;
-  while (*ptr && isspace((unsigned char)*ptr)) ++ptr;
-  if (*ptr != '"') return NULL;
-  ++ptr;
-  if (*ptr != '"')
-    return NULL;
-  ++ptr;
+  ptr += 8; // Skip "\"text\":\"" to start of content
   char *content = malloc (BUFFER_SIZE);
   if (!content)
     return NULL;
@@ -410,20 +406,14 @@ main (int argc, char *argv[])
       return EXIT_FAILURE;
     }
   char json_payload[BUFFER_SIZE];
-  snprintf (json_payload, sizeof (json_payload), "{\"model\":\"%s\",\"input\":\"%s\"}", api_model, escaped_prompt);
+  snprintf (json_payload, BUFFER_SIZE, "{\"model\":\"%s\",\"input\":\"%s\"}", api_model, escaped_prompt);
 // Payload length check removed (large buffer)
-  if (strlen(json_payload) >= sizeof(json_payload) - 1) {
+  if (strlen(json_payload) >= BUFFER_SIZE) {
     fprintf(stderr, "Prompt too long\\n");
     free(escaped_prompt);
     clear_sensitive_data();
     return EXIT_FAILURE;
   }
-    {
-      fprintf (stderr, "Prompt too long\n");
-      free (escaped_prompt);
-      clear_sensitive_data ();
-      return EXIT_FAILURE;
-    }
   char auth_hdr[2048];
   snprintf (auth_hdr, sizeof (auth_hdr), "Authorization: Bearer %s", api_key);
   if (debug_mode)
