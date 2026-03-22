@@ -1,15 +1,15 @@
 <img width="819" height="661" alt="Screenshot From 2026-03-10 13-33-26" src="https://github.com/user-attachments/assets/cab6fd79-9809-4329-87da-a3a9ed1e69ab" />
 
-# feed - a terminal based prompter for use with AI API services using the OpenAI REST protocol.
+# feed - a terminal based prompter for use with xAI's responses API.
 
 ## Limitation
-- Works with OpenAI-compatible APIs (e.g. xAI: https://api.x.ai/v1/chat/completions).
+- Works with xAI's responses API (https://api.x.ai/v1/responses).
 
 ## Usage
 Companies like xAi and OpenAI sell access to their AI systems with API keys and payment by tokens used.
 They have models, like grok-1 which is different from opus. Model names and api key are the gate and
 feed is a user interface of the simplest form, a command line command that takes a prompt to send to an AI and wait for the AI response which is formatted and printed when it arrives. Then feed is done. The API
-that is used is based on the OpenAI protocol, which is standardized.
+that is used is xAI's responses API.
 The interface to the AI server is stateless. Nothing happens outside of the prompt and response unless the
 client, like feed, keeps the "session" alive. You can use the command history and edit the prompt you previously
 sent and keep it going for a long time that way.
@@ -35,7 +35,7 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - Please be aware that these data are expensive and should be protected by the system with logout and
   automatic logout and screen lock. The Linux system has good system security, in my opinion.
 ### These are the variables that feed uses.
-- FEED_URL (required): https://api.x.ai/v1/chat/completions
+- FEED_URL (required): https://api.x.ai/v1/responses
 - FEED_KEY (required): your xAI API key (starts with `xai-...`)
 - FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
 - FEED_USER (optional): Name to use in prompts. Defaults to "Anonymous" if unset.
