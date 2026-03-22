@@ -982,7 +982,8 @@ main (int argc, char *argv[])
         {
           if (stateless_set)
             {
-              fprintf (stderr, "Error: --stateless and --stateful are mutually exclusive\n");
+              fprintf (stderr,
+                       "Error: --stateless and --stateful are mutually exclusive\n");
               return EXIT_FAILURE;
             }
           stateless_mode = 1;
@@ -992,7 +993,8 @@ main (int argc, char *argv[])
         {
           if (stateless_set)
             {
-              fprintf (stderr, "Error: --stateless and --stateful are mutually exclusive\n");
+              fprintf (stderr,
+                       "Error: --stateless and --stateful are mutually exclusive\n");
               return EXIT_FAILURE;
             }
           stateless_mode = 0;
@@ -1004,13 +1006,17 @@ main (int argc, char *argv[])
         }
       else
         {
-          fprintf (stderr, "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n", argv[0]);
+          fprintf (stderr,
+                   "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n",
+                   argv[0]);
           return EXIT_FAILURE;
         }
     }
   if (!prompt)
     {
-      fprintf (stderr, "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n", argv[0]);
+      fprintf (stderr,
+               "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n",
+               argv[0]);
       return EXIT_FAILURE;
     }
   if (!load_config ())
@@ -1027,8 +1033,9 @@ main (int argc, char *argv[])
       return EXIT_FAILURE;
     }
   char json_payload[BUFFER_SIZE];
-  snprintf (json_payload, BUFFER_SIZE, "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}",
-            api_model, escaped_prompt, stateless_mode ? "false" : "true");
+  snprintf (json_payload, BUFFER_SIZE,
+            "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}", api_model,
+            escaped_prompt, stateless_mode ? "false" : "true");
 // Payload length check removed (large buffer)
   if (strlen (json_payload) >= BUFFER_SIZE)
     {

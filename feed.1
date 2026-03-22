@@ -3,13 +3,19 @@
 feed \- terminal based prompter for AI API services
 .SH SYNOPSIS
 .B feed
-[\fB--debug\fR | \fB-d\fR] "\fIyour prompt here\fR"
+[\fB--debug\fR | \fB-d\fR] [\fB--stateless\fR | \fB--stateful\fR] "\fIyour prompt here\fR"
 .SH DESCRIPTION
 feed is a command line tool that sends prompts to AI services using the OpenAI REST protocol. It is designed to work with APIs like xAI Grok and OpenAI. The tool takes a prompt, sends it to the configured AI model, and prints the formatted response with uniform spacing for readability. Code blocks in the response are automatically extracted and saved to files.
 .SH OPTIONS
 .TP
 .B --debug, -d
 Enable debug mode. Prints the API URL, JSON payload, and raw response from the API.
+.TP
+.B --stateless
+Enable stateless mode: sets "store":false in the API request for no response persistence.
+.TP
+.B --stateful
+Enable stateful mode explicitly: sets "store":true in the API request (default behavior).
 .SH ENVIRONMENT VARIABLES
 The following environment variables must be set:
 .TP
@@ -36,6 +42,9 @@ Send a simple prompt to the AI.
 .TP
 feed --debug "Explain quantum physics"
 Send a prompt with debug output enabled.
+.TP
+feed --stateless "What is AI?"
+Send a prompt in stateless mode for one-off queries.
 .TP
 feed "$(cat README.md)"
 Include file contents in the prompt.

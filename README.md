@@ -19,6 +19,7 @@ by building a prompt with system data collections. You could use ls -lotr to fin
 of that and ask for a shell script that tar compresses the folders, then meta-tar the tarfiles.
 - You can redirect the feed output to a file.
 - Use --debug or -d for debugging: prints API URL, JSON payload, and raw response.
+- Use --stateless for stateless mode (store=false) or --stateful for explicit stateful mode (default).
 - Code blocks in responses are automatically extracted and saved to files.
 - Output is formatted with uniform spacing (like fmt -u) for better readability.
 
@@ -26,6 +27,7 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - **Sending file contents**: `feed "$(cat README.md)"` to include file content in the prompt.
 - **Redirecting output**: `feed "How to shower without soap" > shower_advice.txt` to save response to a file.
 - **Automatic code saving**: `feed "Write a hello world in C"` automatically extracts code from ```c ... ``` blocks and saves to files (e.g., food.c).
+- **Stateless mode**: `feed --stateless "One-off question"` to prevent response persistence.
 - **Combining with shell**: Pipe or script with feed for automation, e.g., `echo "Analyze this log" | xargs feed > analysis.txt`.
 ## Dependencies
 - uses the curl utility found in every Linux repository, if not already installed.
@@ -41,6 +43,9 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
 - FEED_USER (optional): Name to use in prompts. Defaults to "Anonymous" if unset.
 - FEED_CONTEXT (optional): Context/system prompt for the AI. Defaults to "You are Grok, a helpful and maximally truthful AI built by xAI." if unset. Can be customized (e.g., for programming focus).
+### Command-Line Options
+- --stateless: Sets "store":false in the API request for stateless mode (no response persistence).
+- --stateful: Explicitly sets "store":true for stateful mode (default behavior). --stateless and --stateful are mutually exclusive.
 ### Error Handling
 - If "no content in response," try using just your first name in FEED_USER or unset it for anonymous mode.
 ## Build
