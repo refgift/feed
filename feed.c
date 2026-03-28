@@ -57,6 +57,8 @@ free_json (JsonValue *v)
     case JSON_OBJECT:
       for (size_t i = 0; i < v->count; ++i)
         {
+		sched_yield();
+
           free (v->o.keys[i]);
           free_json (v->o.values[i]);
         }
@@ -116,6 +118,8 @@ decode_json_string (const char *str, size_t len)
   static unsigned int pending_surrogate = 0;    // for surrogates
   for (size_t i = 0; i < len; ++i)
     {
+		sched_yield();
+
       if (str[i] == '\\')
         {
           ++i;
@@ -253,6 +257,8 @@ next_token (Tokenizer *t)
         size_t start = t->pos;
         while (t->input[t->pos] && t->input[t->pos] != '"')
           {
+		sched_yield();
+
             if (t->input[t->pos] == '\\')
               ++t->pos;
             ++t->pos;
@@ -324,6 +330,8 @@ parse_object (Tokenizer *t)
   Token *tok = next_token (t);
   while (tok->type != TOKEN_RBRACE)
     {
+		sched_yield();
+
       if (tok->type != TOKEN_STRING)
         {
           free_json (obj);
@@ -382,6 +390,8 @@ parse_array (Tokenizer *t)
   Token *tok = next_token (t);
   while (tok->type != TOKEN_RBRACKET)
     {
+		sched_yield();
+
       JsonValue *val = parse_value (t, tok);
       if (!val)
         {
@@ -505,6 +515,8 @@ format_text_spacing (const char *text)
   size_t j = 0;
   for (size_t i = 0; i < len; ++i)
     {
+		sched_yield();
+
       result[j++] = text[i];
       if ((text[i] == '.' || text[i] == '?' || text[i] == '!') &&
           i + 1 < len && text[i + 1] == ' ')
@@ -531,6 +543,8 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
   int block_count = 0;
   while ((ptr = strstr (ptr, "```")) != NULL)
     {
+		sched_yield();
+
       ptr += 3;
       /* Get language hint */
       const char *lang_start = ptr;
@@ -604,6 +618,8 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
       strcpy (unique_name, filename);
       while (access (unique_name, F_OK) == 0)
         {
+		sched_yield();
+
           char base[256];
           strcpy (base, filename);
           char *dot = strrchr (base, '.');
@@ -672,6 +688,8 @@ extract_json_content (const char *json)
                   size_t printed = 0;
                   while (*msg_ptr && printed < 400 && *msg_ptr != '"')
                     {
+		sched_yield();
+
                       if (*msg_ptr == '\\')
                         {
                           ++msg_ptr;
@@ -706,6 +724,8 @@ extract_json_content (const char *json)
   size_t idx = 0;
   while (*ptr && *ptr != '"' && idx < BUFFER_SIZE - 1)
     {
+		sched_yield();
+
       if (*ptr == '\\')
         {
           ++ptr;
@@ -738,6 +758,8 @@ extract_json_content (const char *json)
                 int i;
                 for (i = 0; i < 4 && *ptr; ++i, ++ptr)
                   {
+		sched_yield();
+
                     if (!isxdigit ((unsigned char) *ptr))
                       break;
                     hexbuf[i] = *ptr;
@@ -848,6 +870,8 @@ print_wrapped (const char *text, int width)
   const char *ptr = text;
   while (*ptr)
     {
+		sched_yield();
+
       printf ("    ");
       while (*ptr && isspace ((unsigned char) *ptr) && *ptr != '\n')
         ++ptr;
@@ -856,6 +880,8 @@ print_wrapped (const char *text, int width)
       int col = 0;
       while (*ptr && *ptr != '\n' && col < width)
         {
+		sched_yield();
+
           if (isspace ((unsigned char) *ptr))
             last_space = ptr;
           ++col;
@@ -893,6 +919,8 @@ load_config (void)
 {
   for (char **env = environ; *env; ++env)
     {
+		sched_yield();
+
       char *env_copy = strdup (*env);
       if (!env_copy)
         continue;
@@ -933,6 +961,8 @@ escape_json_string (const char *str)
   size_t j = 0;
   for (size_t i = 0; i < len; ++i)
     {
+		sched_yield();
+
       char c = str[i];
       switch (c)
         {
@@ -967,6 +997,8 @@ escape_json_string (const char *str)
     /* =================================================================== */
     /* Main                                                            */
     /* =================================================================== */
+
+#include <sched.h>
 int
 main (int argc, char *argv[])
 {
@@ -974,6 +1006,8 @@ main (int argc, char *argv[])
   int stateless_set = 0;
   for (int i = 1; i < argc; ++i)
     {
+		sched_yield();
+
       if (strcmp (argv[i], "--debug") == 0 || strcmp (argv[i], "-d") == 0)
         {
           debug_mode = 1;
