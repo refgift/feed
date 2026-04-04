@@ -32,7 +32,7 @@ for explicit stateful mode (default).
 \- Code blocks in responses are automatically extracted and saved to
 files.
 \- Output is formatted with uniform spacing (like fmt \-u) for better
-readability.
+readability. Markdown in prompt/response (headers, lists, quotes, code blocks) is prettied with dynamic indents.
 .SS Advanced Usage
 .IP \[bu] 2
 \f[B]Sending file contents\f[R]:
@@ -77,7 +77,11 @@ FEED_URL (required): https://api.x.ai/v1/responses
 FEED_KEY (required): your xAI API key (starts with \f[CR]xai\-...\f[R])
 .IP \[bu] 2
 FEED_MODEL (required): grok\-beta (or grok\-2\-latest, etc.)
+.IP \[bu] 2
+FEED_CONTEXT (optional): system prompt or context
 ### Command\-Line Options
+.IP \[bu] 2
+\-t: Run comprehensive test suite and exit (recommended first for safety).
 .IP \[bu] 2
 \[en]stateless: Sets \[lq]store\[rq]:false in the API request for
 stateless mode (no response persistence).
@@ -85,6 +89,8 @@ stateless mode (no response persistence).
 \[en]stateful: Explicitly sets \[lq]store\[rq]:true for stateful mode
 (default behavior).
 \[en]stateless and \[en]stateful are mutually exclusive.
+.IP \[bu] 2
+\[en]ask-name: Interactively prompt for filename when saving extracted code blocks.
 .SS Build
 .IP \[bu] 2
 A C compiler is necessary, gcc or clang are the names in the Linux

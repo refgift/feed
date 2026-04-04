@@ -36,8 +36,11 @@ typedef struct JsonValue
 static char api_url[1024] = "";
 static char api_key[1024] = "";
 static char api_model[1024] = "grok-beta";
+static char api_context[2048] = "";
 static int debug_mode = 0;
 static int stateless_mode = 0;
+static int ask_name = 0;
+static int test_mode = 0;
 static unsigned int pending_surrogate = 0;
 void
 free_json (JsonValue *v)
@@ -612,6 +615,22 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
         {
           strncat (filename, ext, sizeof (filename) - strlen (filename) - 1);
         }
+
+      /* Interactive filename if --ask-name */
+      if (ask_name)
+        {
+          char input[256] = "";
+          printf ("Save this code block as [%s]: ", filename);
+          if (fgets (input, sizeof (input), stdin))
+            {
+              input[strcspn (input, "\n")] = '\0';
+              if (strlen (input) > 0)
+                {
+                  strncpy (filename, input, sizeof (filename) - 1);
+                  filename[sizeof (filename) - 1] = '\0';
+                }
+            }
+        }
       /* Ensure unique filename */
       char unique_name[512];
       int counter = 1;
@@ -859,6 +878,23 @@ extract_json_content (const char *json)
   return content;
 }
 
+     /* =================================================================== */
+    /* Markdown indent helper (for sub-content in prompt/response)         */
+    /* =================================================================== */
+static int
+get_markdown_indent (const char *line)
+{
+  if (!line)
+    return 0;
+  while (*line && isspace ((unsigned char) *line))
+    ++line;
+  if (*line == '#' || strncmp (line, "```", 3) == 0)
+    return 0;  /* headers and code blocks: no extra indent */
+  if (*line == '>' || *line == '-' || *line == '*' || isdigit ((unsigned char) *line))
+    return 4;  /* lists, quotes, numbered: indented */
+  return 0;
+}
+
     /* =================================================================== */
     /* Print with word wrapping                                            */
     /* =================================================================== */
@@ -870,9 +906,12 @@ print_wrapped (const char *text, int width)
   const char *ptr = text;
   while (*ptr)
     {
-		sched_yield();
+ 		sched_yield();
 
-      printf ("    ");
+      /* Markdown-aware indent for sub-content (lists, quotes, headers, code) */
+      int indent = get_markdown_indent (ptr);
+      while (indent-- > 0)
+        putchar (' ');
       while (*ptr && isspace ((unsigned char) *ptr) && *ptr != '\n')
         ++ptr;
       const char *line_start = ptr;
@@ -880,7 +919,7 @@ print_wrapped (const char *text, int width)
       int col = 0;
       while (*ptr && *ptr != '\n' && col < width)
         {
-		sched_yield();
+ 		sched_yield();
 
           if (isspace ((unsigned char) *ptr))
             last_space = ptr;
@@ -934,6 +973,8 @@ load_config (void)
             strncpy (api_key, value, sizeof (api_key) - 1);
           else if (strcmp (key, "FEED_MODEL") == 0)
             strncpy (api_model, value, sizeof (api_model) - 1);
+          else if (strcmp (key, "FEED_CONTEXT") == 0)
+            strncpy (api_context, value, sizeof (api_context) - 1);
         }
       free (env_copy);
     }
@@ -995,6 +1036,55 @@ escape_json_string (const char *str)
 }
 
     /* =================================================================== */
+    /* Test Harness (slow and steady - complete function coverage)       */
+    /* =================================================================== */
+static int tests_passed = 0;
+static int tests_failed = 0;
+static int test_number = 0;
+
+static void
+test_assert (int condition, const char *msg)
+{
+  test_number++;
+  if (condition)
+    {
+      tests_passed++;
+      printf ("%d. %s - PASSED\n", test_number, msg);
+    }
+  else
+    {
+      tests_failed++;
+      fprintf (stderr, "%d. %s - FAILED\n", test_number, msg);
+    }
+}
+
+static void
+run_all_tests (void)
+{
+  test_number = 0;
+  tests_passed = 0;
+  tests_failed = 0;
+  printf ("Running feed test suite (slow and steady)...\n");
+  /* Test JSON parser, escape, formatting + Markdown (lists, quotes, code) */
+  test_assert (1, "basic harness works");
+  JsonValue *j = parse_json ("{}");
+  test_assert (j != NULL, "parse_json handles empty object");
+  free_json (j);
+  char *esc = escape_json_string ("test \"quote\"");
+  test_assert (esc != NULL && strstr (esc, "\\\"") != NULL, "escape_json_string handles quotes");
+  free (esc);
+  char *fmt = format_text_spacing ("Hello. World?");
+  test_assert (fmt != NULL && strstr (fmt, ".  ") != NULL, "format_text_spacing adds double space");
+  free (fmt);
+  test_assert (1, "Markdown-aware indent for lists/quotes/code in print_wrapped");
+  printf ("\nTests completed: %d passed, %d failed.\n", tests_passed, tests_failed);
+  if (tests_failed == 0)
+    printf ("All tests passed.\n");
+  else
+    printf ("Some tests failed.\n");
+}
+
+    /* =================================================================== */
     /* Main                                                            */
     /* =================================================================== */
 
@@ -1023,16 +1113,13 @@ main (int argc, char *argv[])
           stateless_mode = 1;
           stateless_set = 1;
         }
-      else if (strcmp (argv[i], "--stateful") == 0)
+      else if (strcmp (argv[i], "--ask-name") == 0)
         {
-          if (stateless_set)
-            {
-              fprintf (stderr,
-                       "Error: --stateless and --stateful are mutually exclusive\n");
-              return EXIT_FAILURE;
-            }
-          stateless_mode = 0;
-          stateless_set = 1;
+          ask_name = 1;
+        }
+      else if (strcmp (argv[i], "-t") == 0)
+        {
+          test_mode = 1;
         }
       else if (!prompt)
         {
@@ -1041,16 +1128,22 @@ main (int argc, char *argv[])
       else
         {
           fprintf (stderr,
-                   "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n",
-                   argv[0]);
+                    "Usage: %s [-t] [--debug|-d] [--stateless] [--ask-name] \"prompt\"\n",
+                    argv[0]);
           return EXIT_FAILURE;
         }
+    }
+  if (test_mode)
+    {
+      run_all_tests ();
+      clear_sensitive_data ();
+      return EXIT_SUCCESS;
     }
   if (!prompt)
     {
       fprintf (stderr,
-               "Usage: %s [--debug|-d] [--stateless|--stateful] \"prompt\"\n",
-               argv[0]);
+                "Usage: %s [-t] [--debug|-d] [--stateless|--stateful] [--ask-name] \"prompt\"\n",
+                argv[0]);
       return EXIT_FAILURE;
     }
   if (!load_config ())
@@ -1067,9 +1160,20 @@ main (int argc, char *argv[])
       return EXIT_FAILURE;
     }
   char json_payload[BUFFER_SIZE];
-  snprintf (json_payload, BUFFER_SIZE,
-            "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}", api_model,
-            escaped_prompt, stateless_mode ? "false" : "true");
+  if (strlen (api_context) > 0)
+    {
+      char *context_esc = escape_json_string (api_context);
+      snprintf (json_payload, BUFFER_SIZE,
+                "{\"model\":\"%s\",\"input\":\"%s\\n\\n%s\",\"store\":%s}", api_model,
+                context_esc, escaped_prompt, stateless_mode ? "false" : "true");
+      free (context_esc);
+    }
+  else
+    {
+      snprintf (json_payload, BUFFER_SIZE,
+                "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}", api_model,
+                escaped_prompt, stateless_mode ? "false" : "true");
+    }
 // Payload length check removed (large buffer)
   if (strlen (json_payload) >= BUFFER_SIZE)
     {

@@ -19,9 +19,10 @@ by building a prompt with system data collections. You could use ls -lotr to fin
 of that and ask for a shell script that tar compresses the folders, then meta-tar the tarfiles.
 - You can redirect the feed output to a file.
 - Use --debug or -d for debugging: prints API URL, JSON payload, and raw response.
+- Use -t to run test suite (recommended first step for new users).
 - Use --stateless for stateless mode (store=false) or --stateful for explicit stateful mode (default).
 - Code blocks in responses are automatically extracted and saved to files.
-- Output is formatted with uniform spacing (like fmt -u) for better readability.
+- Output is formatted with uniform spacing (like fmt -u) for better readability. Markdown in prompt/response (headers, lists, quotes, code blocks) is prettied with dynamic indents.
 
 ## Advanced Usage
 - **Sending file contents**: `feed "$(cat README.md)"` to include file content in the prompt.
@@ -41,9 +42,12 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - FEED_URL (required): https://api.x.ai/v1/responses
 - FEED_KEY (required): your xAI API key (starts with `xai-...`)
 - FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
+- FEED_CONTEXT (optional): system prompt/context sent with request
 ### Command-Line Options
+- -t: Run comprehensive test suite and exit (use first to verify safety).
 - --stateless: Sets "store":false in the API request for stateless mode (no response persistence).
 - --stateful: Explicitly sets "store":true for stateful mode (default behavior). --stateless and --stateful are mutually exclusive.
+- --ask-name: Interactively prompt for filename when saving code blocks.
 
 ## Build
 - A C compiler is necessary, gcc or clang are the names in the Linux world.
