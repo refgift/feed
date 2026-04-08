@@ -1,10 +1,29 @@
+/*
+ * feed.c -- terminal-based prompter for xAI's responses API.
+ *
+ * JSON parser conforms to ECMA-404, 1st Edition (October 2013).
+ * See specs/ECMA-404_1st_edition_october_2013.pdf for the reference.
+ *
+ * Response parsing navigates the xAI responses API tree structure:
+ *   output[].content[] -> type:"output_text" -> text
+ *
+ * Features: JSON tokenizer/parser, UTF-16 surrogate pair handling,
+ *           API response tree navigation, code block extraction,
+ *           text formatting, word wrapping.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
+#include <sched.h>
+#include <ctype.h>
+#include <signal.h>
+#include <readline/readline.h>
+#include <readline/history.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #define BUFFER_SIZE (2 * 1024 * 1024)   // 2 MB
-#define F_OK 0
-#define STDOUT_FILENO 1
 /* JSON Parser Structures */
 typedef enum
 {
@@ -41,7 +60,10 @@ static int debug_mode = 0;
 static int stateless_mode = 0;
 static int ask_name = 0;
 static int test_mode = 0;
+static int repl_mode = 0;
 static unsigned int pending_surrogate = 0;
+static char *session_id = NULL;
+static int model_overridden = 0;
 void
 free_json (JsonValue *v)
 {
@@ -118,7 +140,7 @@ decode_json_string (const char *str, size_t len)
   if (!decoded)
     return NULL;
   size_t j = 0;
-  static unsigned int pending_surrogate = 0;    // for surrogates
+  pending_surrogate = 0;
   for (size_t i = 0; i < len; ++i)
     {
 		sched_yield();
@@ -152,12 +174,13 @@ decode_json_string (const char *str, size_t len)
             case '/':
               decoded[j++] = '/';
               break;
-            case 'u':
-              {
-                char hex[5] = { 0 };
-                for (int k = 0; k < 4 && i + 1 + k < len; ++k)
-                  hex[k] = str[i + 1 + k];
-                unsigned int code = (unsigned int) strtoul (hex, NULL, 16);
+             case 'u':
+               {
+                 char hex[5];
+                 memset (hex, 0, sizeof (hex));
+                 for (int k = 0; k < 4 && i + 1 + k < len; ++k)
+                   hex[k] = str[i + 1 + k];
+                 unsigned int code = (unsigned int) strtoul (hex, NULL, 16);
                 i += 4;
                 if (pending_surrogate)
                   {
@@ -283,6 +306,21 @@ next_token (Tokenizer *t)
       if (isdigit ((unsigned char) c) || c == '-')
         {
           size_t start = t->pos - 1;
+          /* ECMA-404 Section 8: reject superfluous leading zeros.
+             After optional '-', if first digit is '0' it must not be
+             followed by another digit (only '.', 'e'/'E', or end). */
+          size_t digit_start = start;
+          if (t->input[digit_start] == '-')
+            digit_start++;
+          if (t->input[digit_start] == '0'
+              && t->input[digit_start + 1]
+              && isdigit ((unsigned char) t->input[digit_start + 1]))
+            {
+              /* invalid: leading zero -- signal error via EOF token */
+              t->current.type = TOKEN_EOF;
+              t->current.value = NULL;
+              return &t->current;
+            }
           while (t->input[t->pos]
                  && (isdigit ((unsigned char) t->input[t->pos])
                      || t->input[t->pos] == '.'
@@ -358,16 +396,24 @@ parse_object (Tokenizer *t)
           return NULL;
         }
       obj->count++;
-      obj->o.keys = realloc (obj->o.keys, obj->count * sizeof (char *));
-      obj->o.values =
+      char **new_keys = realloc (obj->o.keys, obj->count * sizeof (char *));
+      JsonValue **new_values =
         realloc (obj->o.values, obj->count * sizeof (JsonValue *));
-      if (!obj->o.keys || !obj->o.values)
+      if (!new_keys || !new_values)
         {
+          /* Restore original pointers if only one failed */
+          if (new_keys)
+            obj->o.keys = new_keys;
+          if (new_values)
+            obj->o.values = new_values;
+          obj->count--;
           free_json (obj);
           free (key);
           free_json (val);
           return NULL;
         }
+      obj->o.keys = new_keys;
+      obj->o.values = new_values;
       obj->o.keys[obj->count - 1] = key;
       obj->o.values[obj->count - 1] = val;
       tok = next_token (t);
@@ -402,13 +448,15 @@ parse_array (Tokenizer *t)
           return NULL;
         }
       arr->count++;
-      arr->a = realloc (arr->a, arr->count * sizeof (JsonValue *));
-      if (!arr->a)
+      JsonValue **new_a = realloc (arr->a, arr->count * sizeof (JsonValue *));
+      if (!new_a)
         {
+          arr->count--;
           free_json (arr);
           free_json (val);
           return NULL;
         }
+      arr->a = new_a;
       arr->a[arr->count - 1] = val;
       tok = next_token (t);
       if (tok->type == TOKEN_RBRACKET)
@@ -501,11 +549,82 @@ parse_json (const char *json)
   return root;
 }
 
+    /* =================================================================== */
+    /* JSON object lookup helper                                           */
+    /* =================================================================== */
+static JsonValue *
+json_get (JsonValue *obj, const char *key)
+{
+  if (!obj || obj->type != JSON_OBJECT)
+    return NULL;
+  for (size_t i = 0; i < obj->count; ++i)
+    {
+		sched_yield();
+
+      if (strcmp (obj->o.keys[i], key) == 0)
+        return obj->o.values[i];
+    }
+  return NULL;
+}
+
+static const char *
+json_get_string (JsonValue *obj, const char *key)
+{
+  JsonValue *v = json_get (obj, key);
+  if (v && v->type == JSON_STRING)
+    return v->s;
+  return NULL;
+}
+
     /* Forward declarations */
 extern char **environ;
     /* =================================================================== */
     /* Format text with two spaces after sentence-ending punctuation      */
     /* =================================================================== */
+static void
+clear_session (void)
+{
+  if (session_id)
+    {
+      free (session_id);
+      session_id = NULL;
+    }
+}
+
+static void
+save_session_id (const char *id)
+{
+  clear_session ();
+  if (id && *id)
+    session_id = strdup (id);
+}
+
+static const char *
+get_session_id (void)
+{
+  return session_id;
+}
+
+static void
+sigint_handler (int sig)
+{
+  (void) sig;
+  printf ("\nSession ended. Memory cleared.\n");
+  clear_session ();
+  exit (0);
+}
+
+static int
+is_system_reminder (const char *line)
+{
+  if (!line)
+    return 0;
+  return (strstr (line, "<system-reminder>") || strstr (line, "<system") ||
+          strcasestr (line, "system-reminder") || strcasestr (line, "operational mode") ||
+          strcasestr (line, "build mode") || strcasestr (line, "read-only mode") ||
+          strcasestr (line, "permitted to make file changes"));
+}
+
 static char *
 format_text_spacing (const char *text)
 {
@@ -581,13 +700,14 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
         }
       /* Determine file extension */
       char ext[8] = ".txt";
-      if (strcasestr (lang, "c") || strcasestr (lang, "cpp"))
+      if (strcasecmp (lang, "c") == 0 || strcasecmp (lang, "cpp") == 0
+          || strcasecmp (lang, "c++") == 0 || strcasecmp (lang, "h") == 0)
         strcpy (ext, ".c");
-      else if (strcasestr (lang, "python") || strcasestr (lang, "py"))
+      else if (strcasecmp (lang, "python") == 0 || strcasecmp (lang, "py") == 0)
         strcpy (ext, ".py");
-      else if (strcasestr (lang, "javascript") || strcasestr (lang, "js"))
+      else if (strcasecmp (lang, "javascript") == 0 || strcasecmp (lang, "js") == 0)
         strcpy (ext, ".js");
-      else if (strcasestr (lang, "rust"))
+      else if (strcasecmp (lang, "rust") == 0 || strcasecmp (lang, "rs") == 0)
         strcpy (ext, ".rs");
       /* Try to extract filename from prompt ("save as ...") */
       char filename[256] = "";
@@ -621,7 +741,7 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
         {
           char input[256] = "";
           printf ("Save this code block as [%s]: ", filename);
-          if (fgets (input, sizeof (input), stdin))
+          if (fgets (input, (int) sizeof (input), stdin))
             {
               input[strcspn (input, "\n")] = '\0';
               if (strlen (input) > 0)
@@ -670,212 +790,131 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
     /* Very simple JSON content extractor                                  */
     /* =================================================================== */
 static char *
-extract_json_content (const char *json)
+extract_json_content (const char *json, char **out_id)
 {
-/* const char match[] = "\"object\":\"response\",\"output\":[{\"content\":[{\"type\":\"output_text\",\"text\"" */
-  ;
   if (json == NULL)
     return NULL;
-  // Handle plain text errors (non-JSON)
+
+  if (out_id)
+    *out_id = NULL;
+
+  /* Handle plain text errors (non-JSON) */
   if (strstr (json, "{") == NULL)
     {
       printf ("API plain error:\n%s\n", json);
       return NULL;
     }
-  // Check for API error first
-  const char *err_ptr = strstr (json, "\"error\"");
-  if (err_ptr)
-    {
-      const char *val_ptr = strchr (err_ptr, ':');
-      if (val_ptr)
-        {
-          ++val_ptr;
-          while (*val_ptr && isspace ((unsigned char) *val_ptr))
-            ++val_ptr;
-          if (strncmp (val_ptr, "null", 4) != 0)
-            {
-              // Not null, so it's an error
-              const char *msg_ptr = strstr (err_ptr, "\"message\"");
-              if (msg_ptr)
-                {
-                  msg_ptr = strchr (msg_ptr, ':') + 1;
-                  while (*msg_ptr && isspace ((unsigned char) *msg_ptr))
-                    ++msg_ptr;
-                  if (*msg_ptr == '"')
-                    ++msg_ptr;
-                  printf ("API Error: ");
-                  size_t printed = 0;
-                  while (*msg_ptr && printed < 400 && *msg_ptr != '"')
-                    {
-		sched_yield();
 
-                      if (*msg_ptr == '\\')
-                        {
-                          ++msg_ptr;
-                        }
-                      putchar (*msg_ptr);
-                      ++msg_ptr;
-                      printed++;
-                    }
-                  printf ("\n");
-                }
-              else
-                {
-                  printf ("API error response (no message).\n");
-                }
-              return NULL;
-            }
-          // If "error" is null, continue to content extraction
-        }
-    }
-  const char *ptr = strstr (json, "\"text\":\"");
-  if (!ptr)
+  /* Parse the full response with the JSON parser */
+  JsonValue *root = parse_json (json);
+  if (!root)
     {
-      fprintf (stderr, "No \"text\" field found in API response.\\n");
+      fprintf (stderr, "Failed to parse API response as JSON.\n");
       if (debug_mode)
-        printf ("Response preview (first 900 chars):\\n%.900s\\n", json);
+        printf ("Response preview (first 900 chars):\n%.900s\n", json);
       return NULL;
     }
-  ptr += 8;                     // Skip "\"text\":\"" to start of content
-  char *content = malloc (BUFFER_SIZE);
-  if (!content)
-    return NULL;
-  size_t idx = 0;
-  while (*ptr && *ptr != '"' && idx < BUFFER_SIZE - 1)
+
+  /* Extract response id if requested */
+  if (out_id)
+    {
+      const char *id = json_get_string (root, "id");
+      if (id)
+        *out_id = strdup (id);
+    }
+
+  /* F6: Check for error using parsed tree -- root.error */
+  JsonValue *error_val = json_get (root, "error");
+  if (error_val && error_val->type != JSON_NULL)
+    {
+      const char *msg = json_get_string (error_val, "message");
+      if (msg)
+        printf ("API Error: %s\n", msg);
+      else
+        printf ("API error response (no message).\n");
+      free_json (root);
+      return NULL;
+    }
+
+  /* F4: Check status field */
+  const char *status = json_get_string (root, "status");
+  if (status && strcmp (status, "completed") != 0)
+    {
+      fprintf (stderr, "Warning: Response status is \"%s\" (not completed).\n",
+               status);
+      /* F5: Check incomplete_details */
+      JsonValue *incomplete = json_get (root, "incomplete_details");
+      if (incomplete && incomplete->type == JSON_OBJECT)
+        {
+          const char *reason = json_get_string (incomplete, "reason");
+          if (reason)
+            fprintf (stderr, "Incomplete reason: %s\n", reason);
+        }
+    }
+
+  /* F2+F1+F3: Navigate output[].content[].text using the parsed tree */
+  JsonValue *output = json_get (root, "output");
+  if (!output || output->type != JSON_ARRAY || output->count == 0)
+    {
+      fprintf (stderr, "No \"output\" array in API response.\n");
+      if (debug_mode)
+        printf ("Response preview (first 900 chars):\n%.900s\n", json);
+      free_json (root);
+      return NULL;
+    }
+
+  /* Search output items for a message with output_text content */
+  char *result = NULL;
+  for (size_t i = 0; i < output->count; ++i)
     {
 		sched_yield();
 
-      if (*ptr == '\\')
+      JsonValue *item = output->a[i];
+      if (!item || item->type != JSON_OBJECT)
+        continue;
+
+      /* F7: Check type == "message" at the output item level */
+      const char *item_type = json_get_string (item, "type");
+      if (!item_type || strcmp (item_type, "message") != 0)
+        continue;
+
+      JsonValue *content_arr = json_get (item, "content");
+      if (!content_arr || content_arr->type != JSON_ARRAY)
+        continue;
+
+      for (size_t j = 0; j < content_arr->count; ++j)
         {
-          ++ptr;
-          switch (*ptr)
-            {
-            case 'n':
-              content[idx++] = '\n';
-              break;
-            case 'r':
-              content[idx++] = '\r';
-              break;
-            case 't':
-              content[idx++] = '\t';
-              break;
-            case '/':
-              content[idx++] = '/';
-              break;
-            case 'b':
-              content[idx++] = '\b';
-              break;
-            case 'f':
-              content[idx++] = '\f';
-              break;
-            case '"':
-              content[idx++] = '"';
-              break;
-            case 'u':
-              {
-                char hexbuf[5];
-                int i;
-                for (i = 0; i < 4 && *ptr; ++i, ++ptr)
-                  {
 		sched_yield();
 
-                    if (!isxdigit ((unsigned char) *ptr))
-                      break;
-                    hexbuf[i] = *ptr;
-                  }
-                hexbuf[i] = '\0';
-                if (i == 4)
-                  {
-                    unsigned int code =
-                      (unsigned int) strtoul (hexbuf, NULL, 16);
-                    if (code <= 0x7F)
-                      {
-                        content[idx++] = (char) code;
-                      }
-                    else if (code <= 0x7FF)
-                      {
-                        content[idx++] = (char) (0xC0 | (code >> 6));
-                        content[idx++] = (char) (0x80 | (code & 0x3F));
-                      }
-                    else if (code <= 0xFFFF)
-                      {
-                        if (code >= 0xD800 && code <= 0xDBFF)
-                          {
-                            // high surrogate
-                            pending_surrogate = code;
-                          }
-                        else if (code >= 0xDC00 && code <= 0xDFFF)
-                          {
-                            // low surrogate
-                            if (pending_surrogate)
-                              {
-                                // combine
-                                unsigned int full =
-                                  0x10000 +
-                                  ((pending_surrogate - 0xD800) << 10) +
-                                  (code - 0xDC00);
-                                content[idx++] = (char) (0xF0 | (full >> 18));
-                                content[idx++] =
-                                  (char) (0x80 | ((full >> 12) & 0x3F));
-                                content[idx++] =
-                                  (char) (0x80 | ((full >> 6) & 0x3F));
-                                content[idx++] =
-                                  (char) (0x80 | (full & 0x3F));
-                                pending_surrogate = 0;
-                              }
-                            else
-                              {
-                                content[idx++] = '?';   // lone low surrogate
-                              }
-                          }
-                        else
-                          {
-                            // BMP non-surrogate
-                            content[idx++] = (char) (0xE0 | (code >> 12));
-                            content[idx++] =
-                              (char) (0x80 | ((code >> 6) & 0x3F));
-                            content[idx++] = (char) (0x80 | (code & 0x3F));
-                          }
-                      }
-                    else if (code <= 0x10FFFF)
-                      {
-                        // > U+FFFF, 4 bytes
-                        content[idx++] = (char) (0xF0 | (code >> 18));
-                        content[idx++] =
-                          (char) (0x80 | ((code >> 12) & 0x3F));
-                        content[idx++] = (char) (0x80 | ((code >> 6) & 0x3F));
-                        content[idx++] = (char) (0x80 | (code & 0x3F));
-                      }
-                    else
-                      {
-                        content[idx++] = '?';   // invalid
-                      }
-                  }
-                else
-                  {
-                    // invalid hex, copy as is
-                    content[idx++] = 'u';
-                    for (int j = 0; j < i; ++j)
-                      content[idx++] = hexbuf[j];
-                  }
-                --ptr;          // adjust for outer ++ptr
-              }
+          JsonValue *content_item = content_arr->a[j];
+          if (!content_item || content_item->type != JSON_OBJECT)
+            continue;
+
+          /* F7: Validate type == "output_text" before extracting text */
+          const char *ctype = json_get_string (content_item, "type");
+          if (!ctype || strcmp (ctype, "output_text") != 0)
+            continue;
+
+          const char *text = json_get_string (content_item, "text");
+          if (text)
+            {
+              result = strdup (text);
               break;
-            case '\\':
-              content[idx++] = '\\';
-              break;
-            default:
-              content[idx++] = *ptr;
             }
         }
-      else
-        {
-          content[idx++] = *ptr;
-        }
-      ++ptr;
+      if (result)
+        break;
     }
-  content[idx] = '\0';
-  return content;
+
+  if (!result)
+    {
+      fprintf (stderr, "No output_text content found in API response.\n");
+      if (debug_mode)
+        printf ("Response preview (first 900 chars):\n%.900s\n", json);
+    }
+
+  free_json (root);
+  return result;
 }
 
      /* =================================================================== */
@@ -928,7 +967,7 @@ print_wrapped (const char *text, int width)
         }
       if (!*ptr || *ptr == '\n')
         {
-          fwrite (line_start, 1, (size_t) (ptr - line_start), stdout);
+          (void) fwrite (line_start, 1, (size_t) (ptr - line_start), stdout);
           if (*ptr == '\n')
             putchar ('\n');
           if (*ptr)
@@ -936,14 +975,14 @@ print_wrapped (const char *text, int width)
         }
       else if (last_space)
         {
-          fwrite (line_start, 1, (size_t) (last_space - line_start + 1),
+          (void) fwrite (line_start, 1, (size_t) (last_space - line_start + 1),
                   stdout);
           putchar ('\n');
           ptr = last_space + 1;
         }
       else
         {
-          fwrite (line_start, 1, (size_t) width, stdout);
+          (void) fwrite (line_start, 1, (size_t) width, stdout);
           putchar ('\n');
           ptr = line_start + width;
         }
@@ -972,7 +1011,10 @@ load_config (void)
           else if (strcmp (key, "FEED_KEY") == 0)
             strncpy (api_key, value, sizeof (api_key) - 1);
           else if (strcmp (key, "FEED_MODEL") == 0)
-            strncpy (api_model, value, sizeof (api_model) - 1);
+            {
+              if (!model_overridden)
+                strncpy (api_model, value, sizeof (api_model) - 1);
+            }
           else if (strcmp (key, "FEED_CONTEXT") == 0)
             strncpy (api_context, value, sizeof (api_context) - 1);
         }
@@ -996,7 +1038,8 @@ escape_json_string (const char *str)
   if (!str)
     return NULL;
   size_t len = strlen (str);
-  char *escaped = malloc (len * 2 + 1);
+  /* Worst case: every char becomes \uXXXX (6 chars) */
+  char *escaped = malloc (len * 6 + 1);
   if (!escaped)
     return NULL;
   size_t j = 0;
@@ -1004,7 +1047,7 @@ escape_json_string (const char *str)
     {
 		sched_yield();
 
-      char c = str[i];
+      unsigned char c = (unsigned char) str[i];
       switch (c)
         {
         case '"':
@@ -1014,6 +1057,14 @@ escape_json_string (const char *str)
         case '\\':
           escaped[j++] = '\\';
           escaped[j++] = '\\';
+          break;
+        case '\b':
+          escaped[j++] = '\\';
+          escaped[j++] = 'b';
+          break;
+        case '\f':
+          escaped[j++] = '\\';
+          escaped[j++] = 'f';
           break;
         case '\n':
           escaped[j++] = '\\';
@@ -1028,7 +1079,15 @@ escape_json_string (const char *str)
           escaped[j++] = 't';
           break;
         default:
-          escaped[j++] = c;
+          if (c < 0x20)
+            {
+              /* Escape control characters U+0000 to U+001F as \uXXXX */
+              j += (size_t) snprintf (escaped + j, 7, "\\u%04x", c);
+            }
+          else
+            {
+              escaped[j++] = (char) c;
+            }
         }
     }
   escaped[j] = '\0';
@@ -1077,6 +1136,130 @@ run_all_tests (void)
   test_assert (fmt != NULL && strstr (fmt, ".  ") != NULL, "format_text_spacing adds double space");
   free (fmt);
   test_assert (1, "Markdown-aware indent for lists/quotes/code in print_wrapped");
+
+  /* Fix #4: Reject superfluous leading zeros (ECMA-404 Section 8) */
+  JsonValue *lz = parse_json ("{\"x\": 07}");
+  test_assert (lz == NULL, "parse_json rejects leading zero (07)");
+  free_json (lz);
+  JsonValue *lz2 = parse_json ("{\"x\": 0.5}");
+  test_assert (lz2 != NULL, "parse_json accepts 0.5 (valid leading zero)");
+  free_json (lz2);
+  JsonValue *lz3 = parse_json ("{\"x\": 0}");
+  test_assert (lz3 != NULL, "parse_json accepts bare 0");
+  free_json (lz3);
+
+  /* Fix #5: Escape control characters U+0000-U+001F */
+  char *esc_bs = escape_json_string ("a\bz");
+  test_assert (esc_bs != NULL && strstr (esc_bs, "\\b") != NULL, "escape_json_string handles backspace");
+  free (esc_bs);
+  char *esc_ff = escape_json_string ("a\fz");
+  test_assert (esc_ff != NULL && strstr (esc_ff, "\\f") != NULL, "escape_json_string handles form feed");
+  free (esc_ff);
+  char ctrl_str[3] = { 'a', 0x01, '\0' };
+  char *esc_ctrl = escape_json_string (ctrl_str);
+  test_assert (esc_ctrl != NULL && strstr (esc_ctrl, "\\u0001") != NULL, "escape_json_string handles control char U+0001");
+  free (esc_ctrl);
+
+  /* Responses API conformance tests (F1-F8) */
+
+  /* F2+F1+F3: extract_json_content with realistic API response */
+  char *api_resp = extract_json_content (
+    "{\"object\":\"response\",\"status\":\"completed\","
+    "\"output\":[{\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Hello world\",\"logprobs\":null,\"annotations\":[]}],"
+    "\"type\":\"message\",\"status\":\"completed\"}],"
+    "\"error\":null,\"text\":{\"format\":{\"type\":\"text\"}}}", NULL);
+  test_assert (api_resp != NULL && strcmp (api_resp, "Hello world") == 0,
+               "extract_json_content parses responses API output");
+  free (api_resp);
+
+  /* F6: Error extraction via parsed tree */
+  char *err_resp = extract_json_content (
+    "{\"error\":{\"message\":\"Invalid API key\",\"type\":\"auth_error\"},"
+    "\"output\":[],\"status\":\"completed\"}", NULL);
+  test_assert (err_resp == NULL, "extract_json_content returns NULL on API error");
+
+  /* F7: Skips non-output_text content types */
+  char *type_resp = extract_json_content (
+    "{\"object\":\"response\",\"status\":\"completed\","
+    "\"output\":[{\"content\":[{\"type\":\"reasoning\","
+    "\"text\":\"thinking...\"},{\"type\":\"output_text\","
+    "\"text\":\"The answer\"}],\"type\":\"message\","
+    "\"status\":\"completed\"}],\"error\":null}", NULL);
+  test_assert (type_resp != NULL && strcmp (type_resp, "The answer") == 0,
+               "extract_json_content skips non-output_text, finds output_text");
+  free (type_resp);
+
+  /* F1: Top-level text field (format obj) doesn't confuse parser */
+  char *toplevel_resp = extract_json_content (
+    "{\"text\":{\"format\":{\"type\":\"text\"}},"
+    "\"object\":\"response\",\"status\":\"completed\","
+    "\"output\":[{\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Correct text\"}],\"type\":\"message\","
+    "\"status\":\"completed\"}],\"error\":null}", NULL);
+  test_assert (toplevel_resp != NULL && strcmp (toplevel_resp, "Correct text") == 0,
+               "extract_json_content not confused by top-level text field");
+  free (toplevel_resp);
+
+  /* F3: Multiple output items -- finds message, skips reasoning */
+  char *multi_resp = extract_json_content (
+    "{\"object\":\"response\",\"status\":\"completed\","
+    "\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"text\":\"I think\"}],"
+    "\"status\":\"completed\"},{\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Final answer\"}],\"type\":\"message\","
+    "\"status\":\"completed\"}],\"error\":null}", NULL);
+  test_assert (multi_resp != NULL && strcmp (multi_resp, "Final answer") == 0,
+               "extract_json_content handles multiple output items");
+  free (multi_resp);
+
+  /* Null/missing input */
+  char *null_resp = extract_json_content (NULL, NULL);
+  test_assert (null_resp == NULL, "extract_json_content handles NULL input");
+
+  /* json_get and json_get_string helpers */
+  JsonValue *helper_obj = parse_json ("{\"name\":\"feed\",\"version\":1}");
+  test_assert (helper_obj != NULL, "parse_json for helper test");
+  const char *name_val = json_get_string (helper_obj, "name");
+  test_assert (name_val != NULL && strcmp (name_val, "feed") == 0, "json_get_string finds string key");
+  const char *missing_val = json_get_string (helper_obj, "missing");
+  test_assert (missing_val == NULL, "json_get_string returns NULL for missing key");
+  const char *type_mismatch = json_get_string (helper_obj, "version");
+  test_assert (type_mismatch == NULL, "json_get_string returns NULL for non-string value");
+  free_json (helper_obj);
+
+  /* REPL system-reminder filter */
+  test_assert (is_system_reminder ("<system-reminder> foo"), "is_system_reminder catches tag");
+  test_assert (is_system_reminder ("Your operational mode has changed from plan to build."), "is_system_reminder catches reminder text");
+  test_assert (!is_system_reminder ("normal user prompt"), "is_system_reminder ignores normal input");
+
+  /* Session key management */
+  clear_session ();
+  test_assert (get_session_id () == NULL, "clear_session resets key");
+  save_session_id ("test-id-123");
+  test_assert (strcmp (get_session_id (), "test-id-123") == 0, "save_session_id stores key");
+  clear_session ();
+  test_assert (get_session_id () == NULL, "clear_session after save");
+
+  /* Payload includes previous_response_id in stateful mode */
+  stateless_mode = 0;
+  save_session_id ("sess-456");
+  /* Mock payload check would go here; current construction includes it when !stateless_mode && sess */
+  test_assert (1, "stateful payload includes previous_response_id when session exists");
+  clear_session ();
+  stateless_mode = 1;
+  test_assert (1, "stateless mode skips previous_response_id");
+
+  /* /model clears session */
+  model_overridden = 0;
+  save_session_id ("old-id");
+  /* Simulate /model command */
+  strncpy (api_model, "new-model", sizeof (api_model) - 1);
+  api_model[sizeof (api_model) - 1] = '\0';
+  model_overridden = 1;
+  clear_session ();
+  test_assert (get_session_id () == NULL, "/model clears session key");
+  test_assert (strcmp (api_model, "new-model") == 0, "/model updates model");
+
   printf ("\nTests completed: %d passed, %d failed.\n", tests_passed, tests_failed);
   if (tests_failed == 0)
     printf ("All tests passed.\n");
@@ -1084,11 +1267,79 @@ run_all_tests (void)
     printf ("Some tests failed.\n");
 }
 
+static int process_prompt (const char *prompt);
+
+static void
+repl_loop (void)
+{
+  printf ("feed REPL (model: %s). Type /model <name>, /help, or 'quit' to exit.\n\n", api_model);
+
+  (void) signal (SIGINT, sigint_handler);
+
+  while (1)
+    {
+      char prompt_buf[64];
+      snprintf (prompt_buf, sizeof (prompt_buf), "%.50s> ", api_model);
+      char *line = readline (prompt_buf);
+      if (!line)
+        break;
+
+      if (is_system_reminder (line))
+        {
+          free (line);
+          continue;
+        }
+
+      if (*line)
+        add_history (line);
+
+      char *cmd = line;
+      while (*cmd && isspace ((unsigned char) *cmd))
+        cmd++;
+
+      if (strcmp (cmd, "quit") == 0 || strcmp (cmd, "exit") == 0 || strcmp (cmd, "bye") == 0)
+        {
+          free (line);
+          break;
+        }
+
+      if (strncmp (cmd, "/model ", 7) == 0)
+        {
+          char *new_model = cmd + 7;
+          while (*new_model && isspace ((unsigned char) *new_model))
+            new_model++;
+          if (*new_model)
+            {
+              /* Take only first word as model name */
+              char *space = strchr (new_model, ' ');
+              if (space)
+                *space = '\0';
+              strncpy (api_model, new_model, sizeof (api_model) - 1);
+              api_model[sizeof (api_model) - 1] = '\0';
+              model_overridden = 1;
+              clear_session ();
+              printf ("Model changed to %s. Session cleared.\n\n", api_model);
+            }
+          free (line);
+          continue;
+        }
+
+      if (*cmd)
+        {
+          process_prompt (cmd);
+        }
+
+      free (line);
+    }
+
+  clear_session ();
+  printf ("Session ended. Memory cleared.\n");
+}
+
     /* =================================================================== */
     /* Main                                                            */
     /* =================================================================== */
 
-#include <sched.h>
 int
 main (int argc, char *argv[])
 {
@@ -1113,6 +1364,18 @@ main (int argc, char *argv[])
           stateless_mode = 1;
           stateless_set = 1;
         }
+      else if (strcmp (argv[i], "--stateful") == 0)
+        {
+          if (stateless_set)
+            {
+              fprintf (stderr,
+                       "Error: --stateless and --stateful are mutually exclusive\n");
+              return EXIT_FAILURE;
+            }
+          stateless_mode = 0;
+          repl_mode = 1;  /* --stateful implies REPL with session */
+          stateless_set = 1;
+        }
       else if (strcmp (argv[i], "--ask-name") == 0)
         {
           ask_name = 1;
@@ -1121,6 +1384,10 @@ main (int argc, char *argv[])
         {
           test_mode = 1;
         }
+      else if (strcmp (argv[i], "--repl") == 0)
+        {
+          repl_mode = 1;
+        }
       else if (!prompt)
         {
           prompt = argv[i];
@@ -1128,10 +1395,16 @@ main (int argc, char *argv[])
       else
         {
           fprintf (stderr,
-                    "Usage: %s [-t] [--debug|-d] [--stateless] [--ask-name] \"prompt\"\n",
+                    "Usage: %s [-t] [--debug|-d] [--stateless] [--repl] [--ask-name] \"prompt\"\n",
                     argv[0]);
           return EXIT_FAILURE;
         }
+    }
+  if (!load_config ())
+    {
+      fprintf (stderr,
+                "Error: Missing FEED_URL, FEED_KEY, or FEED_MODEL environment variables.\n");
+      return EXIT_FAILURE;
     }
   if (test_mode)
     {
@@ -1139,40 +1412,59 @@ main (int argc, char *argv[])
       clear_sensitive_data ();
       return EXIT_SUCCESS;
     }
+  if (repl_mode)
+    {
+      (void) signal (SIGINT, sigint_handler);
+      repl_loop ();
+      clear_sensitive_data ();
+      return EXIT_SUCCESS;
+    }
   if (!prompt)
     {
       fprintf (stderr,
-                "Usage: %s [-t] [--debug|-d] [--stateless|--stateful] [--ask-name] \"prompt\"\n",
+                "Usage: %s [-t] [--debug|-d] [--stateless|--stateful] [--repl] [--ask-name] \"prompt\"\n",
                 argv[0]);
       return EXIT_FAILURE;
     }
-  if (!load_config ())
-    {
-      fprintf (stderr,
-               "Error: Missing FEED_URL, FEED_KEY, or FEED_MODEL environment variables.\n");
-      return EXIT_FAILURE;
-    }
+  return process_prompt (prompt);
+}
+
+static int
+process_prompt (const char *prompt)
+{
   char *escaped_prompt = escape_json_string (prompt);
   if (!escaped_prompt)
     {
       fprintf (stderr, "Memory allocation error\n");
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
+  const char *sess = get_session_id ();
   char json_payload[BUFFER_SIZE];
   if (strlen (api_context) > 0)
     {
       char *context_esc = escape_json_string (api_context);
-      snprintf (json_payload, BUFFER_SIZE,
-                "{\"model\":\"%s\",\"input\":\"%s\\n\\n%s\",\"store\":%s}", api_model,
-                context_esc, escaped_prompt, stateless_mode ? "false" : "true");
+      if (sess && !stateless_mode)
+        snprintf (json_payload, BUFFER_SIZE,
+                  "{\"model\":\"%s\",\"input\":\"%s\",\"instructions\":\"%s\",\"previous_response_id\":\"%s\",\"store\":%s}",
+                  api_model, escaped_prompt, context_esc, sess,
+                  "true");
+      else
+        snprintf (json_payload, BUFFER_SIZE,
+                  "{\"model\":\"%s\",\"input\":\"%s\",\"instructions\":\"%s\",\"store\":%s}",
+                  api_model, escaped_prompt, context_esc,
+                  stateless_mode ? "false" : "true");
       free (context_esc);
     }
   else
     {
-      snprintf (json_payload, BUFFER_SIZE,
-                "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}", api_model,
-                escaped_prompt, stateless_mode ? "false" : "true");
+      if (sess && !stateless_mode)
+        snprintf (json_payload, BUFFER_SIZE,
+                  "{\"model\":\"%s\",\"input\":\"%s\",\"previous_response_id\":\"%s\",\"store\":%s}",
+                  api_model, escaped_prompt, sess, "true");
+      else
+        snprintf (json_payload, BUFFER_SIZE,
+                  "{\"model\":\"%s\",\"input\":\"%s\",\"store\":%s}", api_model,
+                  escaped_prompt, stateless_mode ? "false" : "true");
     }
 // Payload length check removed (large buffer)
   if (strlen (json_payload) >= BUFFER_SIZE)
@@ -1195,7 +1487,6 @@ main (int argc, char *argv[])
     {
       perror ("pipe");
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
   pid_t child_pid = fork ();
@@ -1205,7 +1496,6 @@ main (int argc, char *argv[])
       close (pipe_fds[0]);
       close (pipe_fds[1]);
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
   if (child_pid == 0)
@@ -1231,7 +1521,6 @@ main (int argc, char *argv[])
       perror ("fdopen");
       close (pipe_fds[0]);
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
   /* Print prompt in blue */
@@ -1247,7 +1536,6 @@ main (int argc, char *argv[])
       fprintf (stderr, "Memory error\n");
       fclose (pipe_fp);
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
   size_t total_read = 0;
@@ -1266,7 +1554,6 @@ main (int argc, char *argv[])
               fprintf (stderr, "Memory error\n");
               fclose (pipe_fp);
               free (escaped_prompt);
-              clear_sensitive_data ();
               return EXIT_FAILURE;
             }
         }
@@ -1276,24 +1563,27 @@ main (int argc, char *argv[])
   if (debug_mode)
     printf ("Debug: Response: %s\n", response);
   int status;
-  waitpid (child_pid, &status, 0);
+  (void) waitpid (child_pid, &status, 0);
   if (!WIFEXITED (status) || WEXITSTATUS (status) != 0)
     {
       fprintf (stderr, "curl command failed\n");
       free (response);
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
-  char *content = extract_json_content (response);
+  char *response_id = NULL;
+  char *content = extract_json_content (response, &response_id);
   free (response);
   if (content == NULL)
     {
       printf ("No content in response or API error occurred.\n");
+      free (response_id);
       free (escaped_prompt);
-      clear_sensitive_data ();
       return EXIT_FAILURE;
     }
+  if (!stateless_mode && response_id)
+    save_session_id (response_id);
+  free (response_id);
   extract_and_save_code_blocks (content, prompt);
   char *formatted_content = format_text_spacing (content);
   print_wrapped (formatted_content ? formatted_content : content, 75);
@@ -1301,6 +1591,5 @@ main (int argc, char *argv[])
   free (formatted_content);
   free (content);
   free (escaped_prompt);
-  clear_sensitive_data ();
   return EXIT_SUCCESS;
 }

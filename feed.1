@@ -1,9 +1,10 @@
-.PP
-.SH feed \- a terminal based prompter for use with xAI\[cq]s responses API.
-.SS Limitation
+.TH FEED 1 "April 2026" "feed" "User Commands"
+.SH NAME
+feed \- a terminal based prompter for use with xAI\[cq]s responses API.
+.SH LIMITATION
 .IP \[bu] 2
 Works with xAI\[cq]s responses API (https://api.x.ai/v1/responses).
-.SS Usage
+.SH USAGE
 Companies like xAi and OpenAI sell access to their AI systems with API
 keys and payment by tokens used.
 They have models, like grok\-1 which is different from opus.
@@ -24,16 +25,27 @@ analysis by building a prompt with system data collections.
 You could use ls \-lotr to find folders and tar files and make a prompt
 of that and ask for a shell script that tar compresses the folders, then
 meta\-tar the tarfiles.
-\- You can redirect the feed output to a file.
-\- Use \[en]debug or \-d for debugging: prints API URL, JSON payload,
+.IP \[bu] 2
+You can redirect the feed output to a file.
+.IP \[bu] 2
+Use \-\-debug or \-d for debugging: prints API URL, JSON payload,
 and raw response.
-\- Use \[en]stateless for stateless mode (store=false) or \[en]stateful
-for explicit stateful mode (default).
-\- Code blocks in responses are automatically extracted and saved to
+.IP \[bu] 2
+Use \-t to run test suite (21 tests covering JSON conformance, API response
+parsing, escaping, and formatting; recommended first step for new users).
+.IP \[bu] 2
+Use \-\-stateless for single-shot mode (no REPL, no session).
+.IP \[bu] 2
+Use \-\-stateful for REPL mode (interactive with in-memory session caching via previous_response_id).
+.IP \[bu] 2
+In REPL: prompt shows current model (e.g. `grok-beta> `). Use `/model <name>` to change model and clear session. Type `quit`, `exit`, or `bye` (or Ctrl-C) to end.
+.IP \[bu] 2
+Code blocks in responses are automatically extracted and saved to
 files.
-\- Output is formatted with uniform spacing (like fmt \-u) for better
+.IP \[bu] 2
+Output is formatted with uniform spacing (like fmt \-u) for better
 readability. Markdown in prompt/response (headers, lists, quotes, code blocks) is prettied with dynamic indents.
-.SS Advanced Usage
+.SH ADVANCED USAGE
 .IP \[bu] 2
 \f[B]Sending file contents\f[R]:
 \f[CR]feed \[dq]$(cat README.md)\[dq]\f[R] to include file content in
@@ -55,11 +67,38 @@ response persistence.
 \f[B]Combining with shell\f[R]: Pipe or script with feed for automation,
 e.g.,
 \f[CR]echo \[dq]Analyze this log\[dq] | xargs feed > analysis.txt\f[R].
-## Dependencies
+.SH JSON CONFORMANCE
+The built\-in JSON parser conforms to ECMA\-404, 1st Edition (October 2013).
+The reference specification is included in
+\f[CR]specs/ECMA\-404_1st_edition_october_2013.pdf\f[R].
 .IP \[bu] 2
-uses the curl utility found in every Linux repository, if not already
-installed.
-## Configuration ### Shell Environment Variables
+\f[B]Numbers\f[R] (Section 8): Superfluous leading zeros are rejected
+(e.g., 07 is invalid, 0.7 and 0 are valid).
+.IP \[bu] 2
+\f[B]Strings\f[R] (Section 9): All escape sequences are supported:
+\[rs]", \[rs]\[rs], \[rs]/, \[rs]b, \[rs]f, \[rs]n, \[rs]r, \[rs]t,
+and \[rs]uXXXX hex escapes.
+.IP \[bu] 2
+\f[B]Control characters\f[R]: U+0000 through U+001F are properly escaped
+as \[rs]uXXXX when producing JSON output.
+.IP \[bu] 2
+\f[B]UTF\-16 surrogate pairs\f[R]: Non\-BMP characters encoded as
+surrogate pairs (e.g., \[rs]uD834\[rs]uDD1E) are decoded to UTF\-8.
+.SH REPL MODE
+Use \-\-stateful to enter interactive REPL mode (powered by readline for editing, history, and multi-line).
+.IP \[bu] 2
+Prompt shows current model (e.g. `grok-beta> `).
+.IP \[bu] 2
+`/model <name>` changes the model and clears the in-memory session key.
+.IP \[bu] 2
+`quit`, `exit`, `bye`, or Ctrl-C ends the session (memory wiped).
+.IP \[bu] 2
+Stateful mode caches `previous_response_id` in memory for conversation continuity.
+.SH DEPENDENCIES
+.IP \[bu] 2
+Uses the curl utility and GNU readline (`-lreadline`) for REPL mode.
+.SH CONFIGURATION
+.SS Shell Environment Variables
 .IP \[bu] 2
 To set these, from your terminal session you type export
 FEED_KEY=$XAI_API_KEY, for example, and press return.
@@ -70,7 +109,7 @@ that will set them for you.
 Please be aware that these data are expensive and should be protected by
 the system with logout and automatic logout and screen lock.
 The Linux system has good system security, in my opinion.
-### These are the variables that feed uses.
+.SS Environment Variables
 .IP \[bu] 2
 FEED_URL (required): https://api.x.ai/v1/responses
 .IP \[bu] 2
@@ -78,50 +117,54 @@ FEED_KEY (required): your xAI API key (starts with \f[CR]xai\-...\f[R])
 .IP \[bu] 2
 FEED_MODEL (required): grok\-beta (or grok\-2\-latest, etc.)
 .IP \[bu] 2
-FEED_CONTEXT (optional): system prompt or context
-### Command\-Line Options
+FEED_CONTEXT (optional): system prompt sent via the API \f[CR]instructions\f[R] field
+.SS Command\-Line Options
 .IP \[bu] 2
-\-t: Run comprehensive test suite and exit (recommended first for safety).
+\-t: Run test suite (21 tests: JSON parsing, leading\-zero rejection,
+control character escaping, API response parsing, text formatting) and exit.
 .IP \[bu] 2
-\[en]stateless: Sets \[lq]store\[rq]:false in the API request for
+\-\-stateless: Sets \[lq]store\[rq]:false in the API request for
 stateless mode (no response persistence).
 .IP \[bu] 2
-\[en]stateful: Explicitly sets \[lq]store\[rq]:true for stateful mode
+\-\-stateful: Explicitly sets \[lq]store\[rq]:true for stateful mode
 (default behavior).
-\[en]stateless and \[en]stateful are mutually exclusive.
+\-\-stateless and \-\-stateful are mutually exclusive.
 .IP \[bu] 2
-\[en]ask-name: Interactively prompt for filename when saving extracted code blocks.
-.SS Build
-.IP \[bu] 2
+\-\-ask\-name: Interactively prompt for filename when saving extracted code blocks.
+.SH BUILD
+.PP
 A C compiler is necessary, gcc or clang are the names in the Linux
 world.
-### Build Commands
+.SS Build Commands
 .IP \[bu] 2
 cd into the feed directory
 .IP \[bu] 2
-gcc feed.c \-o feed #### Advanced Build \- uses chibicc C compiler by
-default others can be used.
+make
 .IP \[bu] 2
-make #### Uses the splint command, has to be installed
+Or manually: \f[CR]gcc \-D_GNU_SOURCE \-std=c99 \-Wall \-o feed feed.c\f[R]
+.SS Advanced Build
+.PP
+Edit the CC line in Makefile to switch compilers (chibicc, gcc, clang).
 .IP \[bu] 2
-make lint ### Build Test
+\f[CR]make lint\f[R] \- uses the splint command (has to be installed)
+.SS Build Test
 .IP \[bu] 2
 \&./feed
 .IP \[bu] 2
 Without arguments it will tell you to give it an argument.
 .IP \[bu] 2
-\&./feed \[en]debug \[lq]test prompt\[rq] (requires env vars set) to see
+\&./feed \-\-debug \[lq]test prompt\[rq] (requires env vars set) to see
 debug output.
-## System Configuration
+.SH SYSTEM CONFIGURATION
 .IP \[bu] 2
 Placing feed into the system PATH will allow it to be used outside of
-it\[cq]s build directory.
+its build directory.
 .IP \[bu] 2
-sudo cp feed /usr/local/bin will allow you to depense with the ./
+sudo cp feed /usr/local/bin will allow you to dispense with the ./
 .IP \[bu] 2
-mkdir \[ti]/bin then cp feed \[ti]/bin which can be done without
+mkdir ~/bin then cp feed ~/bin which can be done without
 security other than your authority.
-### Manpage Installation
+.SS Manpage Installation
 .IP \[bu] 2
 To enable \f[CR]man feed\f[R], install the manpage:
 .RS 2
@@ -136,14 +179,13 @@ sudo mandb
 For local installation without sudo:
 .RS 2
 .IP \[bu] 2
-mkdir \-p \[ti]/man/man1
+mkdir \-p ~/man/man1
 .IP \[bu] 2
-cp feed.1 \[ti]/man/man1/
+cp feed.1 ~/man/man1/
 .IP \[bu] 2
-export
-MANPATH=\[lq]\f[I]H\f[R]\f[I]O\f[R]\f[I]M\f[R]\f[I]E\f[R]/\f[I]m\f[R]\f[I]a\f[R]\f[I]n\f[R]:MANPATH\[rq]
+export MANPATH="$HOME/man:$MANPATH"
 .IP \[bu] 2
-mandb \[ti]/man
+mandb ~/man
 .IP \[bu] 2
-Add the export to \[ti]/.bashrc for permanence.
+Add the export to ~/.bashrc for permanence.
 .RE

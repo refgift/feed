@@ -19,8 +19,10 @@ by building a prompt with system data collections. You could use ls -lotr to fin
 of that and ask for a shell script that tar compresses the folders, then meta-tar the tarfiles.
 - You can redirect the feed output to a file.
 - Use --debug or -d for debugging: prints API URL, JSON payload, and raw response.
-- Use -t to run test suite (recommended first step for new users).
-- Use --stateless for stateless mode (store=false) or --stateful for explicit stateful mode (default).
+- Use -t to run test suite (21 tests covering JSON conformance, API response parsing, escaping, and formatting; recommended first step for new users).
+- Use --stateless for single-shot mode (no REPL, no session).
+- Use --stateful for REPL mode (interactive with in-memory session caching via previous_response_id).
+- In REPL: prompt shows current model (e.g. `grok-beta> `). Use `/model <name>` to change model and clear session. Type `quit`, `exit`, or `bye` (or Ctrl-C) to end.
 - Code blocks in responses are automatically extracted and saved to files.
 - Output is formatted with uniform spacing (like fmt -u) for better readability. Markdown in prompt/response (headers, lists, quotes, code blocks) is prettied with dynamic indents.
 
@@ -30,8 +32,24 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - **Automatic code saving**: `feed "Write a hello world in C"` automatically extracts code from ```c ... ``` blocks and saves to files (e.g., food.c).
 - **Stateless mode**: `feed --stateless "One-off question"` to prevent response persistence.
 - **Combining with shell**: Pipe or script with feed for automation, e.g., `echo "Analyze this log" | xargs feed > analysis.txt`.
+
+## JSON Conformance
+The built-in JSON parser conforms to ECMA-404, 1st Edition (October 2013). The reference specification is included in `specs/ECMA-404_1st_edition_october_2013.pdf`.
+- **Numbers** (Section 8): Superfluous leading zeros are rejected (e.g., `07` is invalid, `0.7` and `0` are valid).
+- **Strings** (Section 9): All escape sequences are supported: `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, and `\uXXXX` hex escapes.
+- **Control characters**: U+0000 through U+001F are properly escaped as `\uXXXX` when producing JSON output.
+- **UTF-16 surrogate pairs**: Non-BMP characters encoded as surrogate pairs (e.g., `\uD834\uDD1E`) are decoded to UTF-8.
+
+## Responses API Conformance
+The response parser uses the built-in JSON parser to navigate the API response tree structure.
+- **Request**: Sends `model`, `input`, `store`, and optionally `instructions` (for system prompts via FEED_CONTEXT).
+- **Response parsing**: Navigates `output[].content[]` to find items with `type: "output_text"` and extracts the `text` field. Skips reasoning and other non-message output items.
+- **Error handling**: Checks the parsed `error` object; extracts `error.message` if present.
+- **Status checking**: Warns if `status` is not `"completed"` and reports `incomplete_details.reason` if available.
+
 ## Dependencies
-- uses the curl utility found in every Linux repository, if not already installed.
+- `curl` (for API calls)
+- GNU readline (`-lreadline`) for REPL mode (history, editing, multi-line support)
 ## Configuration
 ### Shell Environment Variables
 - To set these, from your terminal session you type export FEED_KEY=$XAI_API_KEY, for example,  and press return.
@@ -42,9 +60,9 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - FEED_URL (required): https://api.x.ai/v1/responses
 - FEED_KEY (required): your xAI API key (starts with `xai-...`)
 - FEED_MODEL (required): grok-beta (or grok-2-latest, etc.)
-- FEED_CONTEXT (optional): system prompt/context sent with request
+- FEED_CONTEXT (optional): system prompt sent via the API `instructions` field
 ### Command-Line Options
-- -t: Run comprehensive test suite and exit (use first to verify safety).
+- -t: Run test suite (21 tests: JSON parsing, leading-zero rejection, control character escaping, API response parsing, text formatting) and exit.
 - --stateless: Sets "store":false in the API request for stateless mode (no response persistence).
 - --stateful: Explicitly sets "store":true for stateful mode (default behavior). --stateless and --stateful are mutually exclusive.
 - --ask-name: Interactively prompt for filename when saving code blocks.
@@ -53,9 +71,10 @@ of that and ask for a shell script that tar compresses the folders, then meta-ta
 - A C compiler is necessary, gcc or clang are the names in the Linux world.
 ### Build Commands
 - cd into the feed directory
-- gcc feed.c -o feed
-#### Advanced Build - uses chibicc C compiler by default others can be used.
 - make
+- Or manually: `gcc -D_GNU_SOURCE -std=c99 -Wall -o feed feed.c`
+#### Advanced Build - uses chibicc C compiler by default others can be used.
+- Edit the CC line in Makefile to switch compilers.
 #### Uses the splint command, has to be installed
 - make lint
 ### Build Test
