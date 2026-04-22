@@ -15,14 +15,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <unistd.h>
-#include <sched.h>
 #include <ctype.h>
 #include <signal.h>
-#include <readline/readline.h>
-#include <readline/history.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <io.h>
+#define popen _popen
+#define pclose _pclose
+#else
+#include <unistd.h>
+#include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <readline/readline.h>
+#include <readline/history.h>
+#endif
 #define BUFFER_SIZE (2 * 1024 * 1024)   // 2 MB
 /* JSON Parser Structures */
 typedef enum
@@ -111,10 +120,10 @@ typedef enum
   TOKEN_TRUE,
   TOKEN_FALSE,
   TOKEN_NULL
-} TokenType;
+} TokenKind;
 typedef struct
 {
-  TokenType type;
+  TokenKind type;
   char *value;
 } Token;
 typedef struct
@@ -577,7 +586,6 @@ json_get_string (JsonValue *obj, const char *key)
 }
 
     /* Forward declarations */
-extern char **environ;
     /* =================================================================== */
     /* Format text with two spaces after sentence-ending punctuation      */
     /* =================================================================== */
@@ -614,15 +622,29 @@ sigint_handler (int sig)
   exit (0);
 }
 
+static void
+enable_ansi_console (void)
+{
+#ifdef _WIN32
+  HANDLE hOut = GetStdHandle (STD_OUTPUT_HANDLE);
+  if (hOut != INVALID_HANDLE_VALUE)
+    {
+      DWORD dwMode = 0;
+      if (GetConsoleMode (hOut, &dwMode))
+        SetConsoleMode (hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+#endif
+}
+
 static int
 is_system_reminder (const char *line)
 {
   if (!line)
     return 0;
   return (strstr (line, "<system-reminder>") || strstr (line, "<system") ||
-          strcasestr (line, "system-reminder") || strcasestr (line, "operational mode") ||
-          strcasestr (line, "build mode") || strcasestr (line, "read-only mode") ||
-          strcasestr (line, "permitted to make file changes"));
+          strstr (line, "system-reminder") || strstr (line, "operational mode") ||
+          strstr (line, "build mode") || strstr (line, "read-only mode") ||
+          strstr (line, "permitted to make file changes"));
 }
 
 static char *
@@ -711,7 +733,7 @@ extract_and_save_code_blocks (const char *content, const char *prompt)
         strcpy (ext, ".rs");
       /* Try to extract filename from prompt ("save as ...") */
       char filename[256] = "";
-      const char *save_pos = strcasestr (prompt, "save as");
+      const char *save_pos = strstr (prompt, "save as");
       if (save_pos)
         {
           save_pos += 7;        /* "save as" */
@@ -995,31 +1017,15 @@ print_wrapped (const char *text, int width)
 static int
 load_config (void)
 {
-  for (char **env = environ; *env; ++env)
-    {
-		sched_yield();
-
-      char *env_copy = strdup (*env);
-      if (!env_copy)
-        continue;
-      char *key = strtok (env_copy, "=");
-      char *value = strtok (NULL, "");
-      if (key && value)
-        {
-          if (strcmp (key, "FEED_URL") == 0)
-            strncpy (api_url, value, sizeof (api_url) - 1);
-          else if (strcmp (key, "FEED_KEY") == 0)
-            strncpy (api_key, value, sizeof (api_key) - 1);
-          else if (strcmp (key, "FEED_MODEL") == 0)
-            {
-              if (!model_overridden)
-                strncpy (api_model, value, sizeof (api_model) - 1);
-            }
-          else if (strcmp (key, "FEED_CONTEXT") == 0)
-            strncpy (api_context, value, sizeof (api_context) - 1);
-        }
-      free (env_copy);
-    }
+  const char *val;
+  if ((val = getenv ("FEED_URL")))
+    strncpy (api_url, val, sizeof (api_url) - 1);
+  if ((val = getenv ("FEED_KEY")))
+    strncpy (api_key, val, sizeof (api_key) - 1);
+  if ((val = getenv ("FEED_MODEL")) && !model_overridden)
+    strncpy (api_model, val, sizeof (api_model) - 1);
+  if ((val = getenv ("FEED_CONTEXT")))
+    strncpy (api_context, val, sizeof (api_context) - 1);
   return (api_url[0] && api_key[0] && api_model[0]);
 }
 
@@ -1273,36 +1279,22 @@ static void
 repl_loop (void)
 {
   printf ("feed REPL (model: %s). Type /model <name>, /help, or 'quit' to exit.\n\n", api_model);
-
+#ifdef _WIN32
   (void) signal (SIGINT, sigint_handler);
-
+  char line_buf[4096];
   while (1)
     {
-      char prompt_buf[64];
-      snprintf (prompt_buf, sizeof (prompt_buf), "%.50s> ", api_model);
-      char *line = readline (prompt_buf);
-      if (!line)
+      printf ("%.50s> ", api_model);
+      if (!fgets (line_buf, sizeof (line_buf), stdin))
         break;
-
-      if (is_system_reminder (line))
-        {
-          free (line);
-          continue;
-        }
-
-      if (*line)
-        add_history (line);
-
-      char *cmd = line;
+      line_buf[strcspn (line_buf, "\n")] = '\0';
+      if (is_system_reminder (line_buf))
+        continue;
+      char *cmd = line_buf;
       while (*cmd && isspace ((unsigned char) *cmd))
         cmd++;
-
       if (strcmp (cmd, "quit") == 0 || strcmp (cmd, "exit") == 0 || strcmp (cmd, "bye") == 0)
-        {
-          free (line);
-          break;
-        }
-
+        break;
       if (strncmp (cmd, "/model ", 7) == 0)
         {
           char *new_model = cmd + 7;
@@ -1310,7 +1302,51 @@ repl_loop (void)
             new_model++;
           if (*new_model)
             {
-              /* Take only first word as model name */
+              char *space = strchr (new_model, ' ');
+              if (space)
+                *space = '\0';
+              strncpy (api_model, new_model, sizeof (api_model) - 1);
+              api_model[sizeof (api_model) - 1] = '\0';
+              model_overridden = 1;
+              clear_session ();
+              printf ("Model changed to %s. Session cleared.\n\n", api_model);
+            }
+          continue;
+        }
+      if (*cmd)
+        process_prompt (cmd);
+    }
+#else
+  (void) signal (SIGINT, sigint_handler);
+  while (1)
+    {
+      char prompt_buf[64];
+      snprintf (prompt_buf, sizeof (prompt_buf), "%.50s> ", api_model);
+      char *line = readline (prompt_buf);
+      if (!line)
+        break;
+      if (is_system_reminder (line))
+        {
+          free (line);
+          continue;
+        }
+      if (*line)
+        add_history (line);
+      char *cmd = line;
+      while (*cmd && isspace ((unsigned char) *cmd))
+        cmd++;
+      if (strcmp (cmd, "quit") == 0 || strcmp (cmd, "exit") == 0 || strcmp (cmd, "bye") == 0)
+        {
+          free (line);
+          break;
+        }
+      if (strncmp (cmd, "/model ", 7) == 0)
+        {
+          char *new_model = cmd + 7;
+          while (*new_model && isspace ((unsigned char) *new_model))
+            new_model++;
+          if (*new_model)
+            {
               char *space = strchr (new_model, ' ');
               if (space)
                 *space = '\0';
@@ -1323,15 +1359,13 @@ repl_loop (void)
           free (line);
           continue;
         }
-
       if (*cmd)
         {
           process_prompt (cmd);
         }
-
       free (line);
     }
-
+#endif
   clear_session ();
   printf ("Session ended. Memory cleared.\n");
 }
@@ -1343,8 +1377,9 @@ repl_loop (void)
 int
 main (int argc, char *argv[])
 {
+  enable_ansi_console ();
   char *prompt = NULL;
-  int stateless_set = 0;
+  int stateless_set = 1;
   for (int i = 1; i < argc; ++i)
     {
 		sched_yield();
@@ -1355,7 +1390,7 @@ main (int argc, char *argv[])
         }
       else if (strcmp (argv[i], "--stateless") == 0)
         {
-          if (stateless_set)
+          if (!stateless_set)
             {
               fprintf (stderr,
                        "Error: --stateless and --stateful are mutually exclusive\n");
@@ -1426,7 +1461,13 @@ main (int argc, char *argv[])
                 argv[0]);
       return EXIT_FAILURE;
     }
-  return process_prompt (prompt);
+  if (process_prompt (prompt)!=0) {
+	fprintf(stderr,"Error: unknown reason\n");
+	return -1;
+  } else {
+	fprintf(stderr,"End\n");
+	return 0;
+  }
 }
 
 static int
@@ -1481,45 +1522,24 @@ process_prompt (const char *prompt)
       printf ("Debug: URL: %s\n", api_url);
       printf ("Debug: Payload: %s\n", json_payload);
     }
-  /* Fork + exec curl */
-  int pipe_fds[2];
-  if (pipe (pipe_fds) == -1)
+  FILE *tmpf = fopen ("feed.tmp.json", "w");
+  if (!tmpf)
     {
-      perror ("pipe");
+      fprintf (stderr, "Failed to create temp file\n");
       free (escaped_prompt);
       return EXIT_FAILURE;
     }
-  pid_t child_pid = fork ();
-  if (child_pid == -1)
-    {
-      perror ("fork");
-      close (pipe_fds[0]);
-      close (pipe_fds[1]);
-      free (escaped_prompt);
-      return EXIT_FAILURE;
-    }
-  if (child_pid == 0)
-    {                           /* Child */
-      close (pipe_fds[0]);
-      dup2 (pipe_fds[1], STDOUT_FILENO);
-      close (pipe_fds[1]);
-      char *curl_args[] = {
-        "curl", "-s", "--max-time", "3600", api_url,
-        "-H", "Content-Type: application/json",
-        "-H", auth_hdr,
-        "-d", json_payload, NULL
-      };
-      execvp ("curl", curl_args);
-      perror ("execvp curl");
-      _exit (EXIT_FAILURE);
-    }
-  /* Parent */
-  close (pipe_fds[1]);
-  FILE *pipe_fp = fdopen (pipe_fds[0], "r");
+  fputs (json_payload, tmpf);
+  fclose (tmpf);
+  char cmd[BUFFER_SIZE * 2];
+  snprintf (cmd, sizeof (cmd), "curl -s --max-time 3600 \"%s\" -H \"Content-Type: application/json\" -H \"%s\" -d @feed.tmp.json", api_url, auth_hdr);
+  if (debug_mode)
+    printf ("Debug: Command: %s\n", cmd);
+  FILE *pipe_fp = popen (cmd, "r");
   if (!pipe_fp)
     {
-      perror ("fdopen");
-      close (pipe_fds[0]);
+      perror ("popen");
+      remove ("feed.tmp.json");
       free (escaped_prompt);
       return EXIT_FAILURE;
     }
@@ -1559,12 +1579,11 @@ process_prompt (const char *prompt)
         }
     }
   response[total_read] = '\0';
-  fclose (pipe_fp);
+  int status = pclose (pipe_fp);
+  remove ("feed.tmp.json");
   if (debug_mode)
     printf ("Debug: Response: %s\n", response);
-  int status;
-  (void) waitpid (child_pid, &status, 0);
-  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0)
+  if (status != 0)
     {
       fprintf (stderr, "curl command failed\n");
       free (response);
