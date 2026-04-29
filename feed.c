@@ -1554,7 +1554,7 @@ process_prompt (const char *prompt)
   if (!response)
     {
       fprintf (stderr, "Memory error\n");
-      fclose (pipe_fp);
+      pclose (pipe_fp);
       free (escaped_prompt);
       return EXIT_FAILURE;
     }
@@ -1572,7 +1572,7 @@ process_prompt (const char *prompt)
           if (!response)
             {
               fprintf (stderr, "Memory error\n");
-              fclose (pipe_fp);
+              pclose (pipe_fp);
               free (escaped_prompt);
               return EXIT_FAILURE;
             }
