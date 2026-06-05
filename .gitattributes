@@ -1,0 +1,8 @@
+# Enforce Unix LF line endings for source and docs (prevents CRLF issues on cross-platform)
+# Use dos2unix to convert if needed.
+*.c text eol=lf
+*.h text eol=lf
+*.1 text eol=lf
+Makefile text eol=lf
+README* text eol=lf
+.gitattributes text eol=lf
