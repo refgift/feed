@@ -1833,11 +1833,17 @@ perform_curl_request (const char *payload, const char *auth_hdr)
 {
   if (write_temp_json (payload) != 0)
     return NULL;
-  char cmd[BUFFER_SIZE * 2];
-  build_curl_command (cmd, sizeof (cmd), api_url, auth_hdr);
+  char *cmd = malloc (BUFFER_SIZE * 2);
+  if (!cmd)
+    {
+      remove ("feed.tmp.json");
+      return NULL;
+    }
+  build_curl_command (cmd, BUFFER_SIZE * 2, api_url, auth_hdr);
   if (debug_mode)
     printf ("Debug: Command: %s\n", cmd);
   FILE *pipe_fp = popen (cmd, "r");
+  free (cmd);
   if (!pipe_fp)
     {
       perror ("popen");
@@ -1866,13 +1872,20 @@ process_prompt (const char *prompt)
       fprintf (stderr, "Memory allocation error\n");
       FAIL;
     }
-  char json_payload[BUFFER_SIZE];
+  char *json_payload = malloc (BUFFER_SIZE);
+  if (!json_payload)
+    {
+      fprintf (stderr, "Memory allocation error\n");
+      free (escaped_prompt);
+      FAIL;
+    }
   build_json_payload (json_payload, BUFFER_SIZE, escaped_prompt);
 // Payload length check removed (large buffer)
   if (strlen (json_payload) >= BUFFER_SIZE)
     {
       fprintf (stderr, "Prompt too long\\n");
       clear_sensitive_data ();
+      free (json_payload);
       free (escaped_prompt);
       FAIL;
     }
@@ -1885,6 +1898,7 @@ process_prompt (const char *prompt)
     }
   echo_prompt (prompt);
   char *response = perform_curl_request (json_payload, auth_hdr);
+  free (json_payload);
   if (!response)
     {
       fprintf (stderr, "curl request failed\n");
